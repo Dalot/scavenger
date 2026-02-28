@@ -1,0 +1,723 @@
+mod bridge;
+mod capsule;
+mod config;
+mod daemon;
+mod db;
+mod graph;
+mod hooks;
+mod memory;
+mod query;
+
+use clap::{Parser, Subcommand};
+use owo_colors::OwoColorize;
+use std::path::PathBuf;
+
+#[derive(Parser)]
+#[command(name = "scavenger", version, about = "AST dependency graph and session memory engine for Claude Code")]
+struct Cli {
+    #[command(subcommand)]
+    command: Commands,
+}
+
+#[derive(Subcommand)]
+enum Commands {
+    /// Initialize Scavenger on a project
+    Init,
+
+    /// Start the daemon in the foreground
+    Daemon,
+
+    /// Manually re-index files
+    Index {
+        /// Path to re-index (defaults to project root)
+        path: Option<PathBuf>,
+    },
+
+    /// Print a capsule to stdout
+    Capsule {
+        /// File to generate capsule for
+        file: PathBuf,
+        /// Symbol name within the file
+        symbol: Option<String>,
+        /// Query string for intent detection
+        #[arg(long)]
+        query: Option<String>,
+        /// Token budget override
+        #[arg(long)]
+        budget: Option<u32>,
+    },
+
+    /// Query annotations
+    Memory {
+        /// Search query
+        #[arg(long)]
+        query: Option<String>,
+        /// Max results
+        #[arg(long, default_value = "20")]
+        limit: u32,
+    },
+
+    /// Graph inspection commands
+    Graph {
+        #[command(subcommand)]
+        command: GraphCommands,
+    },
+
+    /// Add an annotation to a symbol
+    Annotate {
+        /// Symbol name to annotate
+        symbol: String,
+        /// Annotation text
+        text: String,
+        /// Tags (comma-separated)
+        #[arg(long)]
+        tags: Option<String>,
+    },
+
+    /// Merge annotations from another branch
+    MergeAnnotations {
+        /// Source branch to merge from
+        branch: String,
+    },
+
+    /// Run health diagnostics
+    Doctor {
+        /// Show verbose output
+        #[arg(long)]
+        verbose: bool,
+        /// Output format
+        #[arg(long, default_value = "human")]
+        format: OutputFormat,
+    },
+
+    /// Show token savings statistics
+    Stats {
+        /// Filter by session
+        #[arg(long)]
+        session: Option<String>,
+        /// Filter by branch
+        #[arg(long)]
+        branch: Option<String>,
+    },
+
+    /// Manage federated repositories
+    Federate {
+        #[command(subcommand)]
+        command: FederateCommands,
+    },
+
+    /// Hook handlers (called by Claude Code)
+    Hook {
+        #[command(subcommand)]
+        command: HookCommands,
+    },
+}
+
+#[derive(Subcommand)]
+enum GraphCommands {
+    /// Show node/edge counts and centrality top-10
+    Stats,
+    /// Show ASCII neighborhood tree for a symbol
+    Show {
+        /// Symbol name to inspect
+        symbol: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum FederateCommands {
+    /// Add a federated repository
+    Add { path: PathBuf },
+    /// Remove a federated repository
+    Remove { path: PathBuf },
+    /// List all federated repositories
+    List,
+    /// Verify all federated repositories
+    Verify,
+}
+
+#[derive(Subcommand)]
+enum HookCommands {
+    /// Handle PreToolUse hook
+    PreToolUse,
+    /// Handle PostToolUse hook
+    PostToolUse,
+}
+
+#[derive(Clone, clap::ValueEnum)]
+enum OutputFormat {
+    Human,
+    Json,
+}
+
+fn main() {
+    let cli = Cli::parse();
+
+    let result = match cli.command {
+        Commands::Init => cmd_init(),
+        Commands::Daemon => cmd_daemon(),
+        Commands::Index { path } => cmd_index(path),
+        Commands::Capsule { file, symbol, query, budget } => cmd_capsule(file, symbol, query, budget),
+        Commands::Memory { query, limit } => cmd_memory(query, limit),
+        Commands::Graph { command } => cmd_graph(command),
+        Commands::Annotate { symbol, text, tags } => cmd_annotate(symbol, text, tags),
+        Commands::MergeAnnotations { branch } => cmd_merge_annotations(branch),
+        Commands::Doctor { verbose, format } => cmd_doctor(verbose, format),
+        Commands::Stats { session, branch } => cmd_stats(session, branch),
+        Commands::Federate { command } => cmd_federate(command),
+        Commands::Hook { command } => cmd_hook(command),
+    };
+
+    if let Err(e) = result {
+        eprintln!("{} {e}", "Error:".red().bold());
+        std::process::exit(1);
+    }
+}
+
+fn cmd_init() -> Result<(), Box<dyn std::error::Error>> {
+    let project_root = std::env::current_dir()?;
+    let scavenger_dir = db::scavenger_dir(&project_root);
+
+    // Step 1: mkdir .scavenger/ with mode 0700
+    if scavenger_dir.exists() {
+        eprintln!(
+            "{} .scavenger/ already exists. Re-initializing...",
+            "Warning:".yellow().bold()
+        );
+    }
+    std::fs::create_dir_all(&scavenger_dir)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&scavenger_dir, std::fs::Permissions::from_mode(0o700))?;
+    }
+    std::fs::create_dir_all(scavenger_dir.join("indexes"))?;
+
+    let cfg = config::Config::load(&project_root)?;
+    eprintln!("{}", "Scavenger: initializing...".bold());
+
+    // Step 2: Detect branch and open DB
+    let branch = daemon::detect_branch(&project_root);
+    eprintln!("  Branch: {}", branch.cyan());
+    let conn = db::open_branch_db(&scavenger_dir, &branch)?;
+    let _meta_conn = db::open_daemon_meta_db(&scavenger_dir)?;
+
+    // Step 3: Bulk index all source files
+    let source_files = graph::index::collect_source_files(&project_root);
+    eprintln!(
+        "  Indexing {} source files...",
+        source_files.len().to_string().cyan()
+    );
+    let mut graph_state = graph::GraphState::new();
+    let stats = graph::index::bulk_index(&conn, &mut graph_state, &source_files)?;
+    eprintln!(
+        "  Indexed: {} files, {} symbols, {} edges",
+        stats.files_indexed.to_string().green(),
+        stats.symbols_extracted.to_string().green(),
+        stats.edges_created.to_string().green(),
+    );
+
+    // Step 4: Index doc files
+    let doc_files = graph::doc_indexer::collect_doc_files(
+        &project_root,
+        &cfg.docs.patterns,
+        &cfg.docs.exclude,
+    );
+    if !doc_files.is_empty() {
+        eprintln!(
+            "  Indexing {} doc files...",
+            doc_files.len().to_string().cyan()
+        );
+        let mut doc_chunks = 0u32;
+        for doc_path in &doc_files {
+            if let Ok(content) = std::fs::read_to_string(doc_path) {
+                let rel = doc_path.to_string_lossy().to_string();
+                if let Ok(count) = graph::doc_indexer::index_doc_file(&conn, &rel, &content) {
+                    doc_chunks += count;
+                }
+            }
+        }
+        eprintln!("  Doc chunks: {}", doc_chunks.to_string().green());
+    }
+
+    // Step 5: Register hooks + MCP bridge
+    eprintln!("  Registering hooks and MCP bridge...");
+    hooks::register::register_hooks(&project_root)?;
+
+    // Step 6: Append .scavenger/ to .gitignore
+    append_to_gitignore(&project_root)?;
+
+    eprintln!(
+        "\n{} Run {} to start the daemon.",
+        "Done!".green().bold(),
+        "scavenger daemon".cyan().bold()
+    );
+    Ok(())
+}
+
+fn cmd_daemon() -> Result<(), Box<dyn std::error::Error>> {
+    let project_root = std::env::current_dir()?;
+    let scavenger_dir = db::scavenger_dir(&project_root);
+    if !scavenger_dir.exists() {
+        return Err("Not initialized. Run `scavenger init` first.".into());
+    }
+    let rt = tokio::runtime::Runtime::new()?;
+    rt.block_on(daemon::run_daemon(project_root))
+}
+
+fn cmd_index(path: Option<PathBuf>) -> Result<(), Box<dyn std::error::Error>> {
+    let project_root = path.unwrap_or_else(|| std::env::current_dir().unwrap());
+    let scavenger_dir = db::scavenger_dir(&project_root);
+    let branch = daemon::detect_branch(&project_root);
+    let conn = db::open_branch_db(&scavenger_dir, &branch)?;
+
+    let source_files = graph::index::collect_source_files(&project_root);
+    eprintln!("Re-indexing {} files on branch {branch}...", source_files.len());
+
+    let mut g = graph::GraphState::new();
+    g.load_from_db(&conn)?;
+    let stats = graph::index::bulk_index(&conn, &mut g, &source_files)?;
+
+    eprintln!(
+        "Indexed: {} files, {} symbols, {} edges",
+        stats.files_indexed, stats.symbols_extracted, stats.edges_created
+    );
+    Ok(())
+}
+
+fn cmd_capsule(
+    file: PathBuf,
+    symbol: Option<String>,
+    query_str: Option<String>,
+    budget: Option<u32>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let project_root = std::env::current_dir()?;
+    let scavenger_dir = db::scavenger_dir(&project_root);
+    let cfg = config::Config::load(&project_root)?;
+    let branch = daemon::detect_branch(&project_root);
+    let conn = db::open_branch_db(&scavenger_dir, &branch)?;
+
+    let mut g = graph::GraphState::new();
+    g.load_from_db(&conn)?;
+    g.compute_pagerank(0.85, 30);
+
+    let file_str = file.to_string_lossy().to_string();
+    let qr = query::run_query(&conn, &g, &cfg, &file_str, symbol.as_deref(), query_str.as_deref());
+    let result = capsule::assemble(&conn, &g, &cfg, &qr, budget);
+
+    println!("{}", result.text);
+    eprintln!("({} tokens, {} items)", result.token_count, result.items_included);
+    Ok(())
+}
+
+fn cmd_memory(query_str: Option<String>, limit: u32) -> Result<(), Box<dyn std::error::Error>> {
+    let project_root = std::env::current_dir()?;
+    let scavenger_dir = db::scavenger_dir(&project_root);
+    let branch = daemon::detect_branch(&project_root);
+    let conn = db::open_branch_db(&scavenger_dir, &branch)?;
+
+    if let Some(q) = query_str {
+        let matches = db::queries::search_annotations_fts(&conn, &q, limit)?;
+        for m in &matches {
+            println!("  {} (rank: {:.3})", m.id, m.rank);
+        }
+        eprintln!("{} results", matches.len());
+    } else {
+        eprintln!("Use --query to search annotations");
+    }
+    Ok(())
+}
+
+fn cmd_graph(command: GraphCommands) -> Result<(), Box<dyn std::error::Error>> {
+    let project_root = std::env::current_dir()?;
+    let scavenger_dir = db::scavenger_dir(&project_root);
+    let branch = daemon::detect_branch(&project_root);
+    let conn = db::open_branch_db(&scavenger_dir, &branch)?;
+
+    let mut g = graph::GraphState::new();
+    g.load_from_db(&conn)?;
+    g.compute_pagerank(0.85, 30);
+
+    match command {
+        GraphCommands::Stats => {
+            println!("Nodes: {}", g.node_count());
+            println!("Edges: {}", g.edge_count());
+            println!("\nTop 10 by centrality:");
+            let mut nodes: Vec<_> = g.graph.node_indices()
+                .filter_map(|idx| g.graph.node_weight(idx))
+                .collect();
+            nodes.sort_by(|a, b| b.centrality.partial_cmp(&a.centrality).unwrap_or(std::cmp::Ordering::Equal));
+            for (i, w) in nodes.iter().take(10).enumerate() {
+                println!("  {}. {} ({}) — {:.4}", i + 1, w.name, w.kind, w.centrality);
+            }
+        }
+        GraphCommands::Show { symbol } => {
+            let found = g.graph.node_indices()
+                .find(|&idx| g.graph.node_weight(idx).is_some_and(|w| w.name == symbol));
+            if let Some(idx) = found {
+                let w = g.graph.node_weight(idx).unwrap();
+                println!("{} ({})", w.name.bold(), w.kind);
+                println!("  File: {}:{}-{}", w.file_path.display(), w.line_start, w.line_end);
+                println!("  Signature: {}", w.signature);
+                println!("  Centrality: {:.4}", w.centrality);
+
+                let callers = g.callers_of(&w.id);
+                if !callers.is_empty() {
+                    println!("\n  Callers ({}):", callers.len());
+                    for c in callers.iter().take(10) {
+                        println!("    ← {} ({})", c.name, c.file_path.display());
+                    }
+                }
+
+                let callees = g.callees_of(&w.id);
+                if !callees.is_empty() {
+                    println!("\n  Callees ({}):", callees.len());
+                    for c in callees.iter().take(10) {
+                        println!("    → {} ({})", c.name, c.file_path.display());
+                    }
+                }
+            } else {
+                eprintln!("Symbol '{}' not found", symbol);
+            }
+        }
+    }
+    Ok(())
+}
+
+fn cmd_annotate(
+    symbol: String,
+    text: String,
+    tags: Option<String>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let project_root = std::env::current_dir()?;
+    let scavenger_dir = db::scavenger_dir(&project_root);
+    let branch = daemon::detect_branch(&project_root);
+    let conn = db::open_branch_db(&scavenger_dir, &branch)?;
+
+    let id = uuid::Uuid::new_v4().to_string();
+
+    // Try to resolve symbol via FTS5
+    let anchor_value = match db::queries::search_nodes_fts(&conn, &symbol, 1) {
+        Ok(matches) if !matches.is_empty() => matches[0].id.clone(),
+        _ => symbol.clone(),
+    };
+
+    memory::annotations::upsert_annotation(
+        &conn,
+        &id,
+        Some(memory::annotations::AnchorType::Node),
+        Some(&anchor_value),
+        &text,
+        tags.as_deref(),
+    )?;
+
+    println!("Annotation {} created (anchored to {})", id, anchor_value);
+    Ok(())
+}
+
+fn cmd_merge_annotations(branch: String) -> Result<(), Box<dyn std::error::Error>> {
+    let project_root = std::env::current_dir()?;
+    let scavenger_dir = db::scavenger_dir(&project_root);
+    let current_branch = daemon::detect_branch(&project_root);
+
+    let source_conn = db::open_branch_db(&scavenger_dir, &branch)?;
+    let target_conn = db::open_branch_db(&scavenger_dir, &current_branch)?;
+
+    let result = memory::MemoryManager::merge_annotations(&source_conn, &target_conn)?;
+    println!(
+        "Merged from {branch}: {} imported, {} deduped",
+        result.imported, result.deduped
+    );
+    Ok(())
+}
+
+fn cmd_doctor(verbose: bool, format: OutputFormat) -> Result<(), Box<dyn std::error::Error>> {
+    let project_root = std::env::current_dir()?;
+    let scavenger_dir = db::scavenger_dir(&project_root);
+    let no_color = std::env::var("NO_COLOR").is_ok();
+
+    let mut checks: Vec<DiagCheck> = Vec::new();
+
+    // Process checks
+    let pid_path = scavenger_dir.join("daemon.pid");
+    let pid_alive = if pid_path.exists() {
+        let pid_str = std::fs::read_to_string(&pid_path).unwrap_or_default();
+        let pid: i32 = pid_str.trim().parse().unwrap_or(0);
+        pid > 0 && std::path::Path::new(&format!("/proc/{pid}")).exists()
+    } else {
+        false
+    };
+    checks.push(DiagCheck::new("Daemon process", "Process", pid_alive));
+    checks.push(DiagCheck::new("PID file", "Process", pid_path.exists()));
+
+    let sock = scavenger_dir.join("daemon.sock");
+    checks.push(DiagCheck::new("Socket accessible", "Process", sock.exists()));
+
+    // Config check
+    let config_ok = config::Config::load(&project_root).is_ok();
+    checks.push(DiagCheck::new("Config valid", "Config", config_ok));
+
+    // DB integrity
+    let branch = daemon::detect_branch(&project_root);
+    let db_ok = if let Ok(conn) = db::open_branch_db(&scavenger_dir, &branch) {
+        conn.query_row("PRAGMA integrity_check", [], |row| row.get::<_, String>(0))
+            .is_ok_and(|r| r == "ok")
+    } else {
+        false
+    };
+    checks.push(DiagCheck::new("DB integrity", "FileIntegrity", db_ok));
+
+    // Hook registration
+    let settings_path = project_root.join(".claude").join("settings.local.json");
+    let hooks_ok = settings_path.exists();
+    checks.push(DiagCheck::new("Hooks registered", "Dependencies", hooks_ok));
+
+    // .scavenger dir exists
+    checks.push(DiagCheck::new("Initialized", "FileIntegrity", scavenger_dir.exists()));
+
+    // Branch DB exists
+    let sanitized = branch.replace(['/', '\\', ':', '*', '?', '"', '<', '>', '|'], "_");
+    let branch_db = scavenger_dir.join("indexes").join(format!("{sanitized}.db"));
+    checks.push(DiagCheck::new("Branch DB exists", "FileIntegrity", branch_db.exists()));
+
+    match format {
+        OutputFormat::Json => {
+            let results: Vec<serde_json::Value> = checks
+                .iter()
+                .map(|c| {
+                    serde_json::json!({
+                        "name": c.name,
+                        "category": c.category,
+                        "passed": c.passed,
+                    })
+                })
+                .collect();
+            println!("{}", serde_json::to_string_pretty(&results)?);
+        }
+        OutputFormat::Human => {
+            println!("Scavenger Health Check\n");
+            for c in &checks {
+                let icon = if c.passed {
+                    if no_color { "[OK]" } else { "\u{2714}" }
+                } else {
+                    if no_color { "[FAIL]" } else { "\u{2718}" }
+                };
+                if no_color {
+                    println!("  {icon} {}", c.name);
+                } else if c.passed {
+                    println!("  {} {}", icon.green(), c.name);
+                } else {
+                    println!("  {} {}", icon.red(), c.name);
+                }
+            }
+            let passed = checks.iter().filter(|c| c.passed).count();
+            let total = checks.len();
+            println!("\n{passed}/{total} checks passed");
+        }
+    }
+
+    let failed = checks.iter().filter(|c| !c.passed).count();
+    if failed > 0 {
+        std::process::exit(if failed == checks.len() { 2 } else { 1 });
+    }
+    Ok(())
+}
+
+struct DiagCheck {
+    name: &'static str,
+    category: &'static str,
+    passed: bool,
+}
+
+impl DiagCheck {
+    fn new(name: &'static str, category: &'static str, passed: bool) -> Self {
+        Self { name, category, passed }
+    }
+}
+
+fn cmd_stats(
+    session_filter: Option<String>,
+    branch_filter: Option<String>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let project_root = std::env::current_dir()?;
+    let scavenger_dir = db::scavenger_dir(&project_root);
+    let meta_conn = db::open_daemon_meta_db(&scavenger_dir)?;
+
+    let mut where_clause = String::from("WHERE 1=1");
+    if let Some(ref s) = session_filter {
+        where_clause.push_str(&format!(" AND session_id = '{s}'"));
+    }
+    if let Some(ref b) = branch_filter {
+        where_clause.push_str(&format!(" AND branch = '{b}'"));
+    }
+
+    let total_calls: i64 = meta_conn
+        .query_row(
+            &format!("SELECT COUNT(*) FROM token_log {where_clause}"),
+            [],
+            |row| row.get(0),
+        )
+        .unwrap_or(0);
+
+    let total_actual: i64 = meta_conn
+        .query_row(
+            &format!("SELECT COALESCE(SUM(tokens_actual), 0) FROM token_log {where_clause}"),
+            [],
+            |row| row.get(0),
+        )
+        .unwrap_or(0);
+
+    let total_estimated: i64 = meta_conn
+        .query_row(
+            &format!("SELECT COALESCE(SUM(tokens_estimated), 0) FROM token_log {where_clause}"),
+            [],
+            |row| row.get(0),
+        )
+        .unwrap_or(0);
+
+    let savings = if total_estimated > 0 {
+        ((total_estimated - total_actual) as f64 / total_estimated as f64) * 100.0
+    } else {
+        0.0
+    };
+
+    println!("Token Savings Report");
+    println!("====================");
+    if let Some(ref s) = session_filter {
+        println!("Session: {s}");
+    }
+    if let Some(ref b) = branch_filter {
+        println!("Branch: {b}");
+    }
+    println!();
+    println!("Total tool calls:      {total_calls}");
+    println!("Tokens served (actual): {total_actual}");
+    println!("Tokens without index:   {total_estimated}");
+    println!("Savings:                {savings:.1}%");
+
+    if total_estimated > 0 {
+        println!(
+            "Tokens saved:           {}",
+            total_estimated - total_actual
+        );
+    }
+
+    Ok(())
+}
+
+fn cmd_federate(command: FederateCommands) -> Result<(), Box<dyn std::error::Error>> {
+    let project_root = std::env::current_dir()?;
+    let scavenger_dir = db::scavenger_dir(&project_root);
+    let meta_conn = db::open_daemon_meta_db(&scavenger_dir)?;
+
+    // Ensure federated_repos table exists in daemon_meta
+    meta_conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS federated_repos (
+            path TEXT PRIMARY KEY,
+            added_at INTEGER NOT NULL,
+            last_seen INTEGER
+        )",
+    )?;
+
+    match command {
+        FederateCommands::Add { path } => {
+            let abs_path = std::fs::canonicalize(&path)?;
+            if !abs_path.join(".scavenger").exists() {
+                return Err(format!(
+                    "No .scavenger/ directory in {}. Run `scavenger init` there first.",
+                    abs_path.display()
+                )
+                .into());
+            }
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)?
+                .as_secs() as i64;
+            meta_conn.execute(
+                "INSERT OR REPLACE INTO federated_repos (path, added_at, last_seen) VALUES (?1, ?2, ?2)",
+                rusqlite::params![abs_path.to_string_lossy().to_string(), now],
+            )?;
+            println!("Added federated repo: {}", abs_path.display());
+        }
+        FederateCommands::Remove { path } => {
+            let abs_path = std::fs::canonicalize(&path).unwrap_or(path);
+            meta_conn.execute(
+                "DELETE FROM federated_repos WHERE path = ?1",
+                rusqlite::params![abs_path.to_string_lossy().to_string()],
+            )?;
+            println!("Removed federated repo: {}", abs_path.display());
+        }
+        FederateCommands::List => {
+            let mut stmt = meta_conn.prepare("SELECT path, added_at, last_seen FROM federated_repos")?;
+            let rows = stmt.query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, Option<i64>>(2)?,
+                ))
+            })?;
+            println!("Federated Repositories:");
+            for row in rows {
+                let (path, added, last_seen) = row?;
+                println!(
+                    "  {} (added: {}, last_seen: {})",
+                    path,
+                    added,
+                    last_seen.map(|t| t.to_string()).unwrap_or_else(|| "never".to_string())
+                );
+            }
+        }
+        FederateCommands::Verify => {
+            let mut stmt = meta_conn.prepare("SELECT path FROM federated_repos")?;
+            let paths: Vec<String> = stmt
+                .query_map([], |row| row.get(0))?
+                .collect::<Result<Vec<_>, _>>()?;
+
+            for path in &paths {
+                let p = std::path::Path::new(path);
+                let accessible = p.join(".scavenger").exists();
+                let icon = if accessible { "\u{2714}" } else { "\u{2718}" };
+                println!("  {icon} {path}");
+            }
+        }
+    }
+    Ok(())
+}
+
+fn cmd_hook(command: HookCommands) -> Result<(), Box<dyn std::error::Error>> {
+    let project_root = std::env::current_dir()?;
+    let scavenger_dir = db::scavenger_dir(&project_root);
+
+    let rt = tokio::runtime::Runtime::new()?;
+    match command {
+        HookCommands::PreToolUse => {
+            rt.block_on(hooks::handle_pre_tool_use(&scavenger_dir))?;
+        }
+        HookCommands::PostToolUse => {
+            rt.block_on(hooks::handle_post_tool_use(&scavenger_dir))?;
+        }
+    }
+    Ok(())
+}
+
+fn append_to_gitignore(project_root: &std::path::Path) -> Result<(), std::io::Error> {
+    let gitignore_path = project_root.join(".gitignore");
+    let entry = ".scavenger/";
+
+    if gitignore_path.exists() {
+        let content = std::fs::read_to_string(&gitignore_path)?;
+        if content.lines().any(|l| l.trim() == entry) {
+            return Ok(());
+        }
+        let mut file = std::fs::OpenOptions::new()
+            .append(true)
+            .open(&gitignore_path)?;
+        use std::io::Write;
+        if !content.ends_with('\n') {
+            writeln!(file)?;
+        }
+        writeln!(file, "{entry}")?;
+    } else {
+        std::fs::write(&gitignore_path, format!("{entry}\n"))?;
+    }
+    Ok(())
+}

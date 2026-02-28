@@ -1,0 +1,34 @@
+[budget]
+default = 8000                # Token budget for capsules. Valid range: [1000, 100000]
+warning_threshold = 20000     # Warn if --budget exceeds this
+
+[scopes]
+# Named scopes for annotation anchoring. Values are path prefixes.
+# auth = "src/auth/"
+# api = "src/api/"
+# database = ["src/db/", "src/models/"]
+
+[traversal]
+degree_cap = 50               # Skip utility nodes with more edges than this. Valid range: [5, 500]
+node_budget = 100             # Max nodes per traversal. Valid range: [10, 10000]
+builtins_blocklist = []       # Symbols to exclude from traversal, e.g. ["log", "unwrap", "toString"]
+
+[docs]
+enabled = true
+patterns = ["**/*.md", "**/*.markdown"]
+exclude = ["**/node_modules/**", "**/target/**"]
+priority = ["CLAUDE.md", "README.md"]
+
+[analytics]
+enabled = true
+price_per_million_tokens = 3.00
+session_retention_days = 30
+
+[federation]
+repos = []
+# Example: repos = ["/path/to/other-project"]
+
+# [[boundaries]]
+# from = "frontend/src/**/*.ts"
+# to = "backend/src/**/*.py"
+# pattern = "api"
