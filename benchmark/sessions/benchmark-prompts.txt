@@ -1,0 +1,8 @@
+# Scavenger benchmark prompts — one per line
+# Lines starting with # are ignored
+
+What would break if I renamed send_request in src/daemon/socket.rs to send_daemon_request? List every call site and what changes each would need.
+
+Add a new MCP tool called get_graph_stats that returns node count, edge count, and top-5 symbols by centrality. Follow the existing patterns in bridge/mod.rs and handlers.rs.
+
+I'm seeing stale capsules after editing a file — the capsule still shows the old signature. Trace the full path from file edit to capsule refresh and identify where staleness could come from.

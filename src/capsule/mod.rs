@@ -19,6 +19,7 @@ pub enum OutputGroup {
     Documentation,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq)]
 pub enum CandidateSource {
     Target,
@@ -44,6 +45,16 @@ pub struct CandidateItem {
     pub score: f64,
     pub pinned: bool,
     pub group: Option<OutputGroup>,
+    /// For annotations: the anchor type ('node', 'file', 'scope', or None for project-level)
+    pub anchor_type: Option<String>,
+    /// For NodeHistory: distance from current version (1 = most recent)
+    pub version_distance: Option<u32>,
+    /// For NodeHistory: what type of change (signature=1.0, edge=0.7, body=0.4, docstring=0.2)
+    pub change_significance: Option<f64>,
+    /// For annotations/session: BM25 score from FTS5 search (pre-computed)
+    pub bm25_score: Option<f64>,
+    /// For annotations/session: creation/update timestamp (epoch seconds)
+    pub timestamp: Option<i64>,
 }
 
 #[derive(Debug)]
@@ -107,7 +118,18 @@ pub fn assemble(
     let remaining = effective_budget.saturating_sub(
         candidates.iter().map(|c| c.token_count).sum::<u32>(),
     );
-    let text = render::render(&candidates, remaining);
+
+    let target_body = query_result.target.as_ref().and_then(|tid| {
+        let node = graph.get_weight(tid)?;
+        Some(render::TargetBody {
+            file_path: node.file_path.to_string_lossy().to_string(),
+            line_start: node.line_start,
+            line_end: node.line_end,
+            name: node.name.clone(),
+        })
+    });
+
+    let text = render::render(&candidates, remaining, target_body.as_ref());
     let token_count = (text.len() / 4) as u32;
 
     CapsuleResult {

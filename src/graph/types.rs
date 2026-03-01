@@ -158,7 +158,9 @@ pub struct NodeWeight {
     pub line_start: u32,
     pub line_end: u32,
     pub signature: String,
+    #[allow(dead_code)]
     pub signature_hash: String,
+    #[allow(dead_code)]
     pub docstring: Option<String>,
     pub skeleton: String,
     pub centrality: f32,
@@ -166,6 +168,7 @@ pub struct NodeWeight {
 }
 
 /// In-memory representation of a graph edge.
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct EdgeWeight {
     pub kind: EdgeKind,

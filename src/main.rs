@@ -13,7 +13,7 @@ use owo_colors::OwoColorize;
 use std::path::PathBuf;
 
 #[derive(Parser)]
-#[command(name = "scavenger", version, about = "AST dependency graph and session memory engine for Claude Code")]
+#[command(name = "scavenger", version, about = "AST dependency graph and session memory engine for AI coding agents (Claude Code, Cursor)")]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -42,7 +42,7 @@ enum Commands {
         /// Query string for intent detection
         #[arg(long)]
         query: Option<String>,
-        /// Token budget override
+        /// Budget override
         #[arg(long)]
         budget: Option<u32>,
     },
@@ -106,11 +106,27 @@ enum Commands {
         command: FederateCommands,
     },
 
-    /// Hook handlers (called by Claude Code)
+    /// Hook handlers (called by Claude Code / Cursor)
     Hook {
         #[command(subcommand)]
         command: HookCommands,
     },
+
+    /// View session metrics collected by audit hooks
+    Metrics {
+        #[command(subcommand)]
+        command: MetricsCommands,
+    },
+
+    /// Remove scavenger plugin and legacy configuration from this project
+    Clean {
+        /// Also remove the .scavenger/ directory and all indexed data
+        #[arg(long)]
+        purge: bool,
+    },
+
+    /// Start the MCP bridge (stdio JSON-RPC server for Claude Code / Cursor)
+    McpBridge,
 }
 
 #[derive(Subcommand)]
@@ -138,10 +154,43 @@ enum FederateCommands {
 
 #[derive(Subcommand)]
 enum HookCommands {
-    /// Handle PreToolUse hook
+    /// Handle PreToolUse hook (Claude Code: injects capsule as additionalContext)
     PreToolUse,
-    /// Handle PostToolUse hook
+    /// Handle PostToolUse hook (Claude Code: triggers re-index on edits)
     PostToolUse,
+    /// Handle SessionStart hook (starts daemon, returns additional_context for Cursor)
+    SessionStart,
+    /// Handle SessionEnd hook (stops the daemon)
+    SessionEnd,
+    /// Handle afterFileEdit hook (Cursor: triggers re-index on edits)
+    AfterFileEdit,
+    /// Generic audit hook — logs metrics for any Cursor hook event
+    Audit,
+}
+
+#[derive(Subcommand)]
+enum MetricsCommands {
+    /// List all sessions with metrics (auto-detects WITH/WITHOUT scavenger)
+    List,
+    /// Show detailed metrics for a session
+    Show {
+        /// Session/conversation ID (prefix match supported)
+        session: String,
+    },
+    /// Compare two sessions side by side (with vs without scavenger)
+    Compare {
+        /// First session ID (prefix match supported)
+        session_a: String,
+        /// Second session ID (prefix match supported)
+        session_b: String,
+    },
+    /// Label a session for easier identification
+    Tag {
+        /// Session/conversation ID (prefix match supported)
+        session: String,
+        /// Label (e.g. "baseline", "with-scavenger", "prompt-1-without")
+        label: String,
+    },
 }
 
 #[derive(Clone, clap::ValueEnum)]
@@ -166,6 +215,9 @@ fn main() {
         Commands::Stats { session, branch } => cmd_stats(session, branch),
         Commands::Federate { command } => cmd_federate(command),
         Commands::Hook { command } => cmd_hook(command),
+        Commands::Metrics { command } => cmd_metrics(command),
+        Commands::Clean { purge } => cmd_clean(purge),
+        Commands::McpBridge => cmd_mcp_bridge(),
     };
 
     if let Err(e) = result {
@@ -240,18 +292,42 @@ fn cmd_init() -> Result<(), Box<dyn std::error::Error>> {
         eprintln!("  Doc chunks: {}", doc_chunks.to_string().green());
     }
 
-    // Step 5: Register hooks + MCP bridge
-    eprintln!("  Registering hooks and MCP bridge...");
-    hooks::register::register_hooks(&project_root)?;
+    // Step 5: Create Claude Code plugin
+    eprintln!("  Creating Claude Code plugin...");
+    hooks::register::create_plugin(&project_root)?;
+
+    // Step 5b: Register MCP bridge in .claude/settings.local.json
+    eprintln!("  Registering MCP bridge (Claude Code)...");
+    hooks::register::register_mcp_server(&project_root)?;
+
+    // Step 5c: Clean up legacy settings.local.json entries from older versions
+    if let Err(e) = hooks::register::remove_legacy_settings(&project_root) {
+        eprintln!(
+            "  {} Could not clean legacy settings: {e}",
+            "Warning:".yellow().bold()
+        );
+    }
+
+    // Step 5d: Create Cursor IDE config
+    eprintln!("  Registering MCP bridge (Cursor)...");
+    hooks::register::create_cursor_mcp_config(&project_root)?;
+    eprintln!("  Creating Cursor hooks...");
+    hooks::register::create_cursor_hooks(&project_root)?;
 
     // Step 6: Append .scavenger/ to .gitignore
     append_to_gitignore(&project_root)?;
 
+    eprintln!("\n{}", "Done!".green().bold());
     eprintln!(
-        "\n{} Run {} to start the daemon.",
-        "Done!".green().bold(),
-        "scavenger daemon".cyan().bold()
+        "\n  {} {}",
+        "Claude Code:".cyan().bold(),
+        "claude --plugin-dir .scavenger/claude-plugin/"
     );
+    eprintln!(
+        "  {} MCP tools + hooks registered in .cursor/ — works automatically.",
+        "Cursor:".cyan().bold(),
+    );
+    eprintln!("\nThe daemon starts and stops automatically with each session.");
     Ok(())
 }
 
@@ -431,7 +507,7 @@ fn cmd_merge_annotations(branch: String) -> Result<(), Box<dyn std::error::Error
     Ok(())
 }
 
-fn cmd_doctor(verbose: bool, format: OutputFormat) -> Result<(), Box<dyn std::error::Error>> {
+fn cmd_doctor(_verbose: bool, format: OutputFormat) -> Result<(), Box<dyn std::error::Error>> {
     let project_root = std::env::current_dir()?;
     let scavenger_dir = db::scavenger_dir(&project_root);
     let no_color = std::env::var("NO_COLOR").is_ok();
@@ -467,10 +543,10 @@ fn cmd_doctor(verbose: bool, format: OutputFormat) -> Result<(), Box<dyn std::er
     };
     checks.push(DiagCheck::new("DB integrity", "FileIntegrity", db_ok));
 
-    // Hook registration
-    let settings_path = project_root.join(".claude").join("settings.local.json");
-    let hooks_ok = settings_path.exists();
-    checks.push(DiagCheck::new("Hooks registered", "Dependencies", hooks_ok));
+    // Plugin check
+    let plugin = hooks::register::plugin_dir(&project_root);
+    let hooks_ok = plugin.join("hooks/hooks.json").exists();
+    checks.push(DiagCheck::new("Plugin hooks", "Dependencies", hooks_ok));
 
     // .scavenger dir exists
     checks.push(DiagCheck::new("Initialized", "FileIntegrity", scavenger_dir.exists()));
@@ -687,16 +763,177 @@ fn cmd_hook(command: HookCommands) -> Result<(), Box<dyn std::error::Error>> {
     let project_root = std::env::current_dir()?;
     let scavenger_dir = db::scavenger_dir(&project_root);
 
-    let rt = tokio::runtime::Runtime::new()?;
     match command {
         HookCommands::PreToolUse => {
+            let rt = tokio::runtime::Runtime::new()?;
             rt.block_on(hooks::handle_pre_tool_use(&scavenger_dir))?;
         }
         HookCommands::PostToolUse => {
+            let rt = tokio::runtime::Runtime::new()?;
             rt.block_on(hooks::handle_post_tool_use(&scavenger_dir))?;
+        }
+        HookCommands::AfterFileEdit => {
+            let rt = tokio::runtime::Runtime::new()?;
+            rt.block_on(hooks::handle_after_file_edit(&scavenger_dir))?;
+        }
+        HookCommands::Audit => {
+            hooks::metrics::handle_audit(&scavenger_dir)?;
+        }
+        HookCommands::SessionStart => {
+            if !scavenger_dir.exists() {
+                return Ok(());
+            }
+            let pid_path = scavenger_dir.join("daemon.pid");
+            if !is_daemon_running(&pid_path) {
+                let exe = std::env::current_exe().unwrap_or_else(|_| "scavenger".into());
+                std::process::Command::new(exe)
+                    .arg("daemon")
+                    .stdin(std::process::Stdio::null())
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
+                    .spawn()?;
+            }
+            hooks::handle_session_start_with_context();
+        }
+        HookCommands::SessionEnd => {
+            let pid_path = scavenger_dir.join("daemon.pid");
+            if let Some(pid) = read_pid(&pid_path) {
+                #[cfg(unix)]
+                {
+                    unsafe { libc::kill(pid, libc::SIGTERM); }
+                }
+            }
         }
     }
     Ok(())
+}
+
+fn read_pid(pid_path: &std::path::Path) -> Option<i32> {
+    std::fs::read_to_string(pid_path)
+        .ok()
+        .and_then(|s| s.trim().parse().ok())
+        .filter(|&pid| pid > 0)
+}
+
+fn is_daemon_running(pid_path: &std::path::Path) -> bool {
+    read_pid(pid_path).is_some_and(|pid| {
+        std::path::Path::new(&format!("/proc/{pid}")).exists()
+    })
+}
+
+fn cmd_metrics(command: MetricsCommands) -> Result<(), Box<dyn std::error::Error>> {
+    let project_root = std::env::current_dir()?;
+    let scavenger_dir = db::scavenger_dir(&project_root);
+
+    match command {
+        MetricsCommands::List => {
+            let sessions = hooks::metrics::list_sessions(&scavenger_dir);
+            if sessions.is_empty() {
+                eprintln!("No metrics sessions found. Metrics are collected automatically by Cursor hooks.");
+                eprintln!("Start a Cursor chat and the audit hooks will log tool calls to .scavenger/metrics/");
+                return Ok(());
+            }
+            print!("{}", hooks::metrics::format_list(&scavenger_dir, &sessions));
+        }
+        MetricsCommands::Show { session } => {
+            let id = resolve_session_id(&scavenger_dir, &session)?;
+            match hooks::metrics::analyze_session(&scavenger_dir, &id) {
+                Some(s) => print!("{}", hooks::metrics::format_summary(&s)),
+                None => return Err(format!("No metrics found for session {id}").into()),
+            }
+        }
+        MetricsCommands::Compare { session_a, session_b } => {
+            let id_a = resolve_session_id(&scavenger_dir, &session_a)?;
+            let id_b = resolve_session_id(&scavenger_dir, &session_b)?;
+            let a = hooks::metrics::analyze_session(&scavenger_dir, &id_a)
+                .ok_or_else(|| format!("No metrics found for session {id_a}"))?;
+            let b = hooks::metrics::analyze_session(&scavenger_dir, &id_b)
+                .ok_or_else(|| format!("No metrics found for session {id_b}"))?;
+            print!("{}", hooks::metrics::format_comparison(&a, &b));
+        }
+        MetricsCommands::Tag { session, label } => {
+            let id = resolve_session_id(&scavenger_dir, &session)?;
+            hooks::metrics::tag_session(&scavenger_dir, &id, &label)?;
+            eprintln!("Tagged session {} as \"{}\"", &id[..8.min(id.len())], label);
+        }
+    }
+    Ok(())
+}
+
+/// Resolve a session ID prefix to the full ID. Prefers exact matches.
+fn resolve_session_id(scavenger_dir: &std::path::Path, prefix: &str) -> Result<String, Box<dyn std::error::Error>> {
+    let sessions = hooks::metrics::list_sessions(scavenger_dir);
+
+    if let Some(exact) = sessions.iter().find(|id| *id == prefix) {
+        return Ok(exact.clone());
+    }
+
+    let matches: Vec<_> = sessions.iter().filter(|id| id.starts_with(prefix)).collect();
+    match matches.len() {
+        0 => Err(format!("No session found matching prefix '{prefix}'").into()),
+        1 => Ok(matches[0].clone()),
+        _ => {
+            eprintln!("Multiple sessions match prefix '{prefix}':");
+            for id in &matches {
+                eprintln!("  {id}");
+            }
+            Err("Provide a longer prefix to disambiguate".into())
+        }
+    }
+}
+
+fn cmd_clean(purge: bool) -> Result<(), Box<dyn std::error::Error>> {
+    let project_root = std::env::current_dir()?;
+    let plugin = hooks::register::plugin_dir(&project_root);
+    let scavenger_dir = db::scavenger_dir(&project_root);
+
+    let mut removed = Vec::new();
+
+    let pid_path = scavenger_dir.join("daemon.pid");
+    if let Some(pid) = read_pid(&pid_path) {
+        #[cfg(unix)]
+        {
+            unsafe { libc::kill(pid, libc::SIGTERM); }
+        }
+        removed.push("stopped running daemon");
+    }
+
+    if plugin.exists() {
+        std::fs::remove_dir_all(&plugin)?;
+        removed.push("Claude Code plugin (.scavenger/claude-plugin/)");
+    }
+
+    if let Ok(()) = hooks::register::remove_cursor_config(&project_root) {
+        removed.push("Cursor config (.cursor/mcp.json + hooks.json entries)");
+    }
+
+    if purge && scavenger_dir.exists() {
+        std::fs::remove_dir_all(&scavenger_dir)?;
+        removed.push(".scavenger/ directory (all indexed data)");
+    }
+
+    if removed.is_empty() {
+        eprintln!("Nothing to clean.");
+    } else {
+        eprintln!("{}", "Cleaned:".green().bold());
+        for item in &removed {
+            eprintln!("  - {item}");
+        }
+    }
+
+    Ok(())
+}
+
+fn cmd_mcp_bridge() -> Result<(), Box<dyn std::error::Error>> {
+    let project_root = std::env::current_dir()?;
+    let scavenger_dir = db::scavenger_dir(&project_root);
+
+    if !scavenger_dir.exists() {
+        return Err("Not initialized. Run `scavenger init` first.".into());
+    }
+
+    let rt = tokio::runtime::Runtime::new()?;
+    rt.block_on(bridge::run_mcp_bridge(scavenger_dir))
 }
 
 fn append_to_gitignore(project_root: &std::path::Path) -> Result<(), std::io::Error> {

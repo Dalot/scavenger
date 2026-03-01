@@ -28,6 +28,11 @@ fn new_candidate(
         score: 0.0,
         pinned: false,
         group: None,
+        anchor_type: None,
+        version_distance: None,
+        change_significance: None,
+        bm25_score: None,
+        timestamp: None,
     }
 }
 
@@ -97,33 +102,190 @@ pub fn gather(
         }
     }
 
-    // 3. Annotations via FTS5
+    // 3. Annotations — node-anchored, file-anchored, and project-level
     if let Some(ref target_id) = query_result.target {
-        if let Ok(annotations) = crate::db::queries::get_annotations_for_anchor(
-            conn, "node", &target_id.0,
-        ) {
-            for ann in annotations {
-                let stale_marker = if ann.stale { " [STALE \u{26A0}]" } else { "" };
-                let content = format!("[annotation{}] {}", stale_marker, ann.text);
-                candidates.push(new_candidate(
-                    content.clone(),
-                    estimate_tokens(&content),
-                    CandidateSource::Annotation,
-                    Some(target_id.clone()),
-                    None,
-                    ann.stale,
-                    false,
-                ));
-            }
-        }
+        gather_annotations(conn, graph, target_id, &mut candidates);
     }
 
-    // 4. Behavioral signals
+    // 4. Node version history for target
+    if let Some(ref target_id) = query_result.target {
+        gather_node_history(conn, target_id, &mut candidates);
+    }
+
+    // 5. Behavioral signals
     if let Some(ref target_id) = query_result.target {
         gather_signals(conn, target_id, &mut candidates);
     }
 
-    // 5. Doc chunks via FTS5 search
+    // 6. Doc chunks via FTS5 search + unconditional priority docs
+    gather_doc_chunks(conn, config, query_result, &mut candidates);
+
+    candidates
+}
+
+fn gather_annotations(
+    conn: &Connection,
+    graph: &GraphState,
+    target_id: &NodeId,
+    candidates: &mut Vec<CandidateItem>,
+) {
+    // Node-anchored annotations for the target
+    if let Ok(annotations) = crate::db::queries::get_annotations_for_anchor(
+        conn, "node", &target_id.0,
+    ) {
+        for ann in annotations {
+            let prefix = if ann.stale { "[STALE \u{26A0}]" } else { "[NOTE]" };
+            let content = format!("{prefix} {}", ann.text);
+            let mut item = new_candidate(
+                content.clone(),
+                estimate_tokens(&content),
+                CandidateSource::Annotation,
+                Some(target_id.clone()),
+                None,
+                ann.stale,
+                false,
+            );
+            item.anchor_type = Some("node".to_string());
+            item.timestamp = Some(ann.updated_at);
+            candidates.push(item);
+        }
+    }
+
+    // File-anchored annotations for the target's file
+    if let Some(w) = graph.get_weight(target_id) {
+        let file_str = w.file_path.to_string_lossy().to_string();
+        if let Ok(annotations) = crate::db::queries::get_annotations_for_anchor(
+            conn, "file", &file_str,
+        ) {
+            for ann in annotations {
+                let prefix = if ann.stale { "[STALE \u{26A0}]" } else { "[NOTE]" };
+                let content = format!("{prefix} {}", ann.text);
+                let mut item = new_candidate(
+                    content.clone(),
+                    estimate_tokens(&content),
+                    CandidateSource::Annotation,
+                    None,
+                    Some(file_str.clone()),
+                    ann.stale,
+                    false,
+                );
+                item.anchor_type = Some("file".to_string());
+                item.timestamp = Some(ann.updated_at);
+                candidates.push(item);
+            }
+        }
+    }
+
+    // Project-level annotations (anchor_type IS NULL)
+    if let Ok(annotations) = crate::db::queries::get_project_level_annotations(conn) {
+        for ann in annotations {
+            let prefix = if ann.stale { "[STALE \u{26A0}]" } else { "[NOTE]" };
+            let content = format!("{prefix} {}", ann.text);
+            let mut item = new_candidate(
+                content.clone(),
+                estimate_tokens(&content),
+                CandidateSource::Annotation,
+                None,
+                None,
+                ann.stale,
+                false,
+            );
+            item.anchor_type = None; // project-level
+            item.timestamp = Some(ann.updated_at);
+            candidates.push(item);
+        }
+    }
+}
+
+fn gather_node_history(
+    conn: &Connection,
+    target_id: &NodeId,
+    candidates: &mut Vec<CandidateItem>,
+) {
+    if let Some(sig_hash) = crate::db::queries::get_node_signature_hash(conn, &target_id.0) {
+        if let Ok(versions) = crate::memory::versions::get_recent_versions(conn, &sig_hash, 5) {
+            if versions.len() < 2 {
+                return;
+            }
+            // Compare consecutive versions to determine change type
+            for (i, ver) in versions.iter().enumerate().skip(1) {
+                let prev = &versions[i - 1];
+                let significance = compute_change_significance(prev, ver);
+                let change_desc = describe_change(prev, ver);
+                let content = format!("[CHANGED] {change_desc}");
+                let mut item = new_candidate(
+                    content.clone(),
+                    estimate_tokens(&content),
+                    CandidateSource::NodeHistory,
+                    Some(target_id.clone()),
+                    None,
+                    false,
+                    false,
+                );
+                item.version_distance = Some(i as u32);
+                item.change_significance = Some(significance);
+                item.timestamp = Some(ver.created_at);
+                candidates.push(item);
+            }
+        }
+    }
+}
+
+fn compute_change_significance(
+    newer: &crate::memory::versions::VersionInfo,
+    older: &crate::memory::versions::VersionInfo,
+) -> f64 {
+    if newer.signature != older.signature {
+        1.0
+    } else if newer.edges_json != older.edges_json {
+        0.7
+    } else {
+        0.4 // body change (default — we don't have docstring-only detection here)
+    }
+}
+
+fn describe_change(
+    newer: &crate::memory::versions::VersionInfo,
+    older: &crate::memory::versions::VersionInfo,
+) -> String {
+    if newer.signature != older.signature {
+        format!("Signature changed: {} → {}", older.signature, newer.signature)
+    } else if newer.edges_json != older.edges_json {
+        "Dependencies changed".to_string()
+    } else {
+        "Body modified".to_string()
+    }
+}
+
+fn gather_doc_chunks(
+    conn: &Connection,
+    config: &Config,
+    query_result: &QueryResult,
+    candidates: &mut Vec<CandidateItem>,
+) {
+    let mut seen_files = std::collections::HashSet::new();
+
+    // Priority docs are unconditionally included (design §6.5)
+    for priority_name in &config.docs.priority {
+        if let Ok(chunks) = crate::db::queries::get_doc_chunks_for_file(conn, priority_name) {
+            for m in chunks {
+                let heading = m.heading.as_deref().unwrap_or("(untitled)");
+                let content = format!("[doc: {} > {}]\n{}", m.file_path, heading, m.content);
+                candidates.push(new_candidate(
+                    content.clone(),
+                    estimate_tokens(&content),
+                    CandidateSource::DocChunk,
+                    None,
+                    Some(m.file_path.clone()),
+                    false,
+                    true,
+                ));
+                seen_files.insert(m.file_path);
+            }
+        }
+    }
+
+    // FTS5 search for additional doc chunks
     let search_query = query_result.search_results
         .first()
         .map(|r| r.node_id.0.clone())
@@ -131,6 +293,9 @@ pub fn gather(
     if !search_query.is_empty() {
         if let Ok(doc_matches) = crate::db::queries::search_doc_chunks_fts(conn, &search_query, 5) {
             for m in doc_matches {
+                if seen_files.contains(&m.file_path) {
+                    continue;
+                }
                 let heading = m.heading.as_deref().unwrap_or("(untitled)");
                 let is_priority = config.docs.priority.iter().any(|p| m.file_path.contains(p));
                 let content = format!("[doc: {} > {}]\n{}", m.file_path, heading, m.content);
@@ -146,8 +311,6 @@ pub fn gather(
             }
         }
     }
-
-    candidates
 }
 
 fn gather_signals(conn: &Connection, target_id: &NodeId, candidates: &mut Vec<CandidateItem>) {

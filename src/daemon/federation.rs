@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -5,7 +6,6 @@ use std::time::{Duration, Instant};
 use rusqlite::Connection;
 use serde_json::{json, Value};
 
-use crate::db;
 use crate::db::queries;
 
 /// Manages connections to federated repositories.

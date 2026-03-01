@@ -76,6 +76,7 @@ pub fn signature_hash(sig: &str) -> String {
 
 /// Split camelCase/snake_case for FTS5 indexing.
 /// `getUserById` → `getUserById get User By Id`
+#[allow(dead_code)]
 pub fn fts_split(name: &str) -> String {
     use heck::ToSnakeCase;
     let snake = name.to_snake_case();
@@ -633,6 +634,7 @@ pub struct ReindexPrep {
     pub file_path: String,
     pub parse_result: Option<FileParseResult>,
     pub old_node_ids: Vec<String>,
+    #[allow(dead_code)]
     pub name_to_new_id: HashMap<String, NodeId>,
     pub similarity_matches: Vec<super::similarity::SimilarityMatch>,
 }
@@ -747,6 +749,19 @@ pub fn incremental_reindex_swap(
         );
     }
 
+    // Step 6b: Mark annotations stale for orphaned nodes (not matched by similarity)
+    let migrated_old_ids: std::collections::HashSet<&str> = prep
+        .similarity_matches
+        .iter()
+        .map(|m| m.old_id.0.as_str())
+        .collect();
+
+    for old_id in &prep.old_node_ids {
+        if !migrated_old_ids.contains(old_id.as_str()) {
+            let _ = queries::mark_annotations_stale_for_node(&tx, old_id);
+        }
+    }
+
     // Step 7: Delete old nodes and their edges from DB
     if !prep.old_node_ids.is_empty() {
         queries::delete_edges_for_nodes(&tx, &prep.old_node_ids)?;
@@ -812,26 +827,54 @@ pub fn incremental_reindex_swap(
         }
 
         for edge in &pr.edges {
-            if let Some(to_id) = name_to_id.get(&edge.to_name) {
-                queries::upsert_edge(
-                    &tx,
-                    &edge.from_id.0,
-                    &to_id.0,
-                    edge.kind,
-                    1.0,
-                    edge.confidence,
-                )?;
-                graph.add_edge(
-                    &edge.from_id,
-                    to_id,
-                    super::types::EdgeWeight {
-                        kind: edge.kind,
-                        weight: 1.0,
-                        confidence: edge.confidence,
-                    },
-                );
-                edges_added += 1;
-            }
+            let to_id = if let Some(id) = name_to_id.get(&edge.to_name) {
+                id.clone()
+            } else if edge.confidence == Confidence::Heuristic || edge.confidence == Confidence::Speculative {
+                // Create phantom node for unresolved callees (design §4.6)
+                let phantom_id = NodeId::compute("<unresolved>", &edge.to_name, &edge.to_name);
+                if name_to_id.contains_key(&edge.to_name) {
+                    name_to_id[&edge.to_name].clone()
+                } else {
+                    let phantom_weight = super::types::NodeWeight {
+                        id: phantom_id.clone(),
+                        kind: super::types::NodeKind::Function,
+                        name: edge.to_name.clone(),
+                        file_path: PathBuf::from("<unresolved>"),
+                        line_start: 0,
+                        line_end: 0,
+                        signature: format!("[UNRESOLVED] {}", edge.to_name),
+                        signature_hash: String::new(),
+                        docstring: None,
+                        skeleton: format!("[UNRESOLVED] {}", edge.to_name),
+                        centrality: 0.0,
+                        checksum: Vec::new(),
+                    };
+                    graph.add_node(phantom_weight);
+                    name_to_id.insert(edge.to_name.clone(), phantom_id.clone());
+                    phantom_id
+                }
+            } else {
+                continue;
+            };
+
+            queries::upsert_edge(
+                &tx,
+                &edge.from_id.0,
+                &to_id.0,
+                edge.kind,
+                1.0,
+                edge.confidence,
+            )?;
+            graph.add_edge(
+                &edge.from_id,
+                &to_id,
+                super::types::EdgeWeight {
+                    kind: edge.kind,
+                    weight: 1.0,
+                    confidence: edge.confidence,
+                },
+            );
+            edges_added += 1;
         }
     }
 

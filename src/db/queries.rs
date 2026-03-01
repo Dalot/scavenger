@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use rusqlite::{params, Connection, OptionalExtension};
 
 use super::DbResult;
@@ -527,4 +528,57 @@ pub fn prune_old_versions(conn: &Connection, symbol_hash: &str, keep: u32) -> Db
         params![symbol_hash, keep],
     )?;
     Ok(deleted as u64)
+}
+
+pub fn get_node_signature_hash(conn: &Connection, node_id: &str) -> Option<String> {
+    conn.query_row(
+        "SELECT signature_hash FROM nodes WHERE id = ?1",
+        params![node_id],
+        |row| row.get(0),
+    )
+    .optional()
+    .ok()
+    .flatten()
+}
+
+pub fn get_doc_chunks_for_file(conn: &Connection, file_name: &str) -> DbResult<Vec<DocChunkMatch>> {
+    let pattern = format!("%{file_name}");
+    let mut stmt = conn.prepare(
+        "SELECT file_path, chunk_index, heading, content, token_estimate, 0.0 AS rank
+         FROM doc_chunks WHERE file_path LIKE ?1
+         ORDER BY chunk_index LIMIT 10",
+    )?;
+    let rows = stmt
+        .query_map(params![pattern], |row| {
+            Ok(DocChunkMatch {
+                file_path: row.get(0)?,
+                chunk_index: row.get(1)?,
+                heading: row.get(2)?,
+                content: row.get(3)?,
+                token_estimate: row.get(4)?,
+                rank: row.get(5)?,
+            })
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(rows)
+}
+
+pub fn get_project_level_annotations(conn: &Connection) -> DbResult<Vec<AnnotationRow>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, text, tags, stale, created_at, updated_at
+         FROM annotations WHERE anchor_type IS NULL",
+    )?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok(AnnotationRow {
+                id: row.get(0)?,
+                text: row.get(1)?,
+                tags: row.get(2)?,
+                stale: row.get(3)?,
+                created_at: row.get(4)?,
+                updated_at: row.get(5)?,
+            })
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(rows)
 }

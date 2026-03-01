@@ -15,9 +15,11 @@ use crate::graph::GraphState;
 /// Layer 2: Annotations with anchoring (annotations.rs)
 /// Layer 3: Behavioral signals + session activity (signals.rs, session.rs)
 pub struct MemoryManager {
+    #[allow(dead_code)]
     pub detector: antipattern::AntiPatternDetector,
 }
 
+#[allow(dead_code)]
 impl MemoryManager {
     pub fn new() -> Self {
         Self {
@@ -139,8 +141,26 @@ impl MemoryManager {
                 .unwrap_or(false);
 
             if exists {
+                // Rule 1: same anchor + same text → skip
                 deduped += 1;
             } else {
+                // Rule 3: only import node-anchored annotations if the NodeId exists in target
+                if at.as_deref() == Some("node") {
+                    if let Some(ref node_id) = av {
+                        let node_exists: bool = target_conn
+                            .query_row(
+                                "SELECT COUNT(*) FROM nodes WHERE id = ?1",
+                                rusqlite::params![node_id],
+                                |row| row.get::<_, i64>(0).map(|c| c > 0),
+                            )
+                            .unwrap_or(false);
+                        if !node_exists {
+                            continue;
+                        }
+                    }
+                }
+
+                // Rule 2: same anchor + different text → keep both (new ID if clash)
                 let new_id = if target_conn
                     .query_row(
                         "SELECT COUNT(*) FROM annotations WHERE id = ?1",
@@ -222,6 +242,13 @@ mod tests {
         let source = setup_db();
         let target = setup_db();
 
+        // Node must exist in target for Rule 3 (node-anchored annotations import only if NodeId exists)
+        target.execute(
+            "INSERT INTO nodes (id, kind, name, file_path, line_start, line_end, signature, signature_hash, skeleton, checksum)
+             VALUES ('n1', 'Function', 'hello', 'src/lib.rs', 1, 5, 'fn hello()', 'aabb0011', 'fn hello()', X'CAFE')",
+            [],
+        ).unwrap();
+
         crate::db::queries::insert_annotation(
             &source, "a1", Some("node"), Some("n1"), "source note", None, 1000,
         ).unwrap();
@@ -235,5 +262,20 @@ mod tests {
 
         let annotations = annotations::read_by_anchor(&target, "node", "n1").unwrap();
         assert_eq!(annotations.len(), 2);
+    }
+
+    #[test]
+    fn test_merge_skips_annotations_for_missing_nodes() {
+        let source = setup_db();
+        let target = setup_db();
+
+        // Source has an annotation for "n_missing" which does NOT exist in target's nodes table
+        crate::db::queries::insert_annotation(
+            &source, "a1", Some("node"), Some("n_missing"), "orphan note", None, 1000,
+        ).unwrap();
+
+        let result = MemoryManager::merge_annotations(&source, &target).unwrap();
+        assert_eq!(result.imported, 0, "should skip annotations for missing nodes");
+        assert_eq!(result.deduped, 0);
     }
 }

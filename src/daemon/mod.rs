@@ -360,8 +360,9 @@ async fn handle_watch_events(
 }
 
 /// Detect current git branch, falling back to "main".
+/// Detached HEAD returns `HEAD_<first12chars>` per design doc §8.7.
 pub fn detect_branch(project_root: &Path) -> String {
-    std::process::Command::new("git")
+    let branch = std::process::Command::new("git")
         .args(["rev-parse", "--abbrev-ref", "HEAD"])
         .current_dir(project_root)
         .output()
@@ -375,5 +376,26 @@ pub fn detect_branch(project_root: &Path) -> String {
                 None
             }
         })
-        .unwrap_or_else(|| "main".to_string())
+        .unwrap_or_else(|| "main".to_string());
+
+    if branch == "HEAD" {
+        let hash = std::process::Command::new("git")
+            .args(["rev-parse", "--short=12", "HEAD"])
+            .current_dir(project_root)
+            .output()
+            .ok()
+            .and_then(|out| {
+                if out.status.success() {
+                    String::from_utf8(out.stdout)
+                        .ok()
+                        .map(|s| s.trim().to_string())
+                } else {
+                    None
+                }
+            })
+            .unwrap_or_else(|| "unknown".to_string());
+        format!("HEAD_{hash}")
+    } else {
+        branch
+    }
 }

@@ -161,6 +161,7 @@ impl ReindexCoordinator {
     }
 
     /// Perform a freshness scan: compare filesystem state against indexed files.
+    #[allow(dead_code)]
     pub fn freshness_scan(state: &Arc<DaemonState>) -> Result<FreshnessResult, Box<dyn std::error::Error>> {
         *state.reindex_state.write() = ReindexState::Indexing;
 
@@ -212,6 +213,7 @@ impl ReindexCoordinator {
 
     /// Branch cleanup: delete DB files for branches that no longer exist.
     /// Compares on-disk index files against `git branch` output.
+    #[allow(dead_code)]
     pub fn cleanup_deleted_branches(state: &Arc<DaemonState>) -> Result<u64, Box<dyn std::error::Error>> {
         let live_branches = list_git_branches(&state.project_root);
         let live_sanitized: std::collections::HashSet<String> = live_branches
@@ -270,33 +272,55 @@ fn git_diff_files(project_root: &std::path::Path, base_branch: &str) -> Vec<std:
     }
 }
 
-/// Find branches that were recently merged (from reflog).
+/// Find source branches for the most recent merge commit.
+/// Uses `git branch --points-at <second-parent-hash>` per design §8.5.
 fn find_merged_branches(project_root: &std::path::Path) -> Vec<String> {
-    let output = std::process::Command::new("git")
-        .args(["reflog", "--format=%gs", "-20"])
+    // Get parent hashes of HEAD
+    let parents_output = std::process::Command::new("git")
+        .args(["log", "-1", "--format=%P", "HEAD"])
         .current_dir(project_root)
         .output();
 
-    match output {
+    let parent_hashes: Vec<String> = match parents_output {
         Ok(out) if out.status.success() => {
-            let reflog = String::from_utf8_lossy(&out.stdout);
-            reflog
-                .lines()
-                .filter_map(|line| {
-                    if line.starts_with("merge ") {
-                        Some(line.trim_start_matches("merge ").trim().to_string())
-                    } else {
-                        None
-                    }
-                })
-                .take(5)
+            String::from_utf8_lossy(&out.stdout)
+                .trim()
+                .split_whitespace()
+                .map(|s| s.to_string())
                 .collect()
         }
-        _ => Vec::new(),
+        _ => return Vec::new(),
+    };
+
+    if parent_hashes.len() < 2 {
+        return Vec::new();
     }
+
+    // For each non-first parent, find which branches point at that commit
+    let mut branches = Vec::new();
+    for parent_hash in &parent_hashes[1..] {
+        let output = std::process::Command::new("git")
+            .args(["branch", "--points-at", parent_hash, "--format=%(refname:short)"])
+            .current_dir(project_root)
+            .output();
+
+        if let Ok(out) = output {
+            if out.status.success() {
+                for line in String::from_utf8_lossy(&out.stdout).lines() {
+                    let branch = line.trim().to_string();
+                    if !branch.is_empty() && !branches.contains(&branch) {
+                        branches.push(branch);
+                    }
+                }
+            }
+        }
+    }
+
+    branches
 }
 
 /// List all local git branches.
+#[allow(dead_code)]
 fn list_git_branches(project_root: &std::path::Path) -> Vec<String> {
     let output = std::process::Command::new("git")
         .args(["branch", "--format=%(refname:short)"])
@@ -315,6 +339,7 @@ fn list_git_branches(project_root: &std::path::Path) -> Vec<String> {
     }
 }
 
+#[allow(dead_code)]
 #[derive(Debug)]
 pub struct FreshnessResult {
     pub stale_count: u64,

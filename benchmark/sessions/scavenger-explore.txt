@@ -1,0 +1,7 @@
+# Scavenger benchmark session — multi-turn exploration task
+# Each line is a follow-up turn in the same session.
+# Simulates a developer understanding, then modifying a subsystem.
+
+How does the capsule pipeline work? Walk me through the stages from request to response.
+Which functions in the scoring stage could be affected if I changed the token_budget config field name to max_tokens?
+Make that rename — change token_budget to max_tokens everywhere it appears. Update config parsing, default values, and any documentation references.

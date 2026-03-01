@@ -78,6 +78,8 @@ exclude = ["node_modules", "target", ".git"]
 
 Rust, Python, TypeScript, TSX, JavaScript, JSX, Go, Java, C#, C, C++, Ruby, Bash, PHP, Swift
 
+> **Note**: Kotlin is not yet supported. The `tree-sitter-kotlin` crate requires tree-sitter <0.23, which is incompatible with our tree-sitter 0.25 dependency. Will be added when a compatible version is released.
+
 ## Architecture
 
 ```

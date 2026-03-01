@@ -17,7 +17,7 @@ path = "src/main.rs"
 [dependencies]
 # MCP SDK
 rmcp = { version = "0.17", features = ["server", "transport-io"] }
-schemars = "0.8"
+schemars = "1"
 
 # AST parsing
 tree-sitter = "0.25"
@@ -32,7 +32,9 @@ tree-sitter-c = "0.23"
 tree-sitter-cpp = "0.23"
 tree-sitter-ruby = "0.23"
 tree-sitter-bash = "0.23"
-# tree-sitter-kotlin not yet compatible with tree-sitter 0.24+ API
+# tree-sitter-kotlin 0.3.8 requires tree-sitter <0.23 — incompatible with our 0.25.
+# No compatible version exists as of 2026-03-01. Kotlin is a known unsupported language.
+# Re-evaluate when tree-sitter-kotlin releases a 0.4+ version.
 tree-sitter-php = "0.23"
 tree-sitter-swift = "0.7"
 
@@ -82,6 +84,7 @@ tracing-subscriber = "0.3"
 uuid = { version = "1", features = ["v4"] }
 chrono = "0.4"
 thiserror = "2"
+libc = "0.2.182"
 
 [dev-dependencies]
 tempfile = "3"

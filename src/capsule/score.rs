@@ -1,7 +1,16 @@
+use std::collections::HashSet;
+
 use crate::graph::GraphState;
 use crate::graph::types::NodeId;
 
 use super::{CandidateItem, CandidateSource};
+
+/// Context needed by the scorer beyond what's on individual CandidateItems.
+pub struct ScoringContext<'a> {
+    pub target_file: Option<String>,
+    pub one_hop_ids: HashSet<&'a NodeId>,
+    pub neighbor_files: HashSet<String>,
+}
 
 /// SCORE stage: apply per-source scoring formula to each candidate.
 /// Scores are in [0.0, 1.0]. BehavioralSignals are pinned (score = 1.0).
@@ -22,6 +31,8 @@ pub fn score(
     let bm25_map: std::collections::HashMap<&NodeId, f64> =
         query_bm25_scores.iter().map(|(id, s)| (id, *s)).collect();
 
+    let ctx = build_scoring_context(graph, target);
+
     for item in candidates.iter_mut() {
         item.score = match item.source {
             CandidateSource::Target => 1.0,
@@ -33,7 +44,7 @@ pub fn score(
             }
 
             CandidateSource::Annotation => {
-                score_annotation(item, target)
+                score_annotation(item, target, &ctx)
             }
 
             CandidateSource::DocChunk => {
@@ -45,10 +56,32 @@ pub fn score(
             }
 
             CandidateSource::SessionActivity => {
-                0.5
+                score_session_activity(item)
             }
         };
     }
+}
+
+fn build_scoring_context<'a>(graph: &'a GraphState, target: Option<&'a NodeId>) -> ScoringContext<'a> {
+    let target_file = target
+        .and_then(|t| graph.get_weight(t))
+        .map(|w| w.file_path.to_string_lossy().to_string());
+
+    let mut one_hop_ids = HashSet::new();
+    let mut neighbor_files = HashSet::new();
+
+    if let Some(t) = target {
+        for caller in graph.callers_of(t) {
+            one_hop_ids.insert(&caller.id);
+            neighbor_files.insert(caller.file_path.to_string_lossy().to_string());
+        }
+        for callee in graph.callees_of(t) {
+            one_hop_ids.insert(&callee.id);
+            neighbor_files.insert(callee.file_path.to_string_lossy().to_string());
+        }
+    }
+
+    ScoringContext { target_file, one_hop_ids, neighbor_files }
 }
 
 /// GraphNode: 0.4 * centrality + 0.6 * bm25
@@ -75,24 +108,90 @@ fn score_graph_node(
     0.4 * centrality + 0.6 * bm25
 }
 
-/// Annotation: (0.5 * bm25 + 0.3 * proximity + 0.2 * recency) * stale_penalty
-fn score_annotation(item: &CandidateItem, target: Option<&NodeId>) -> f64 {
-    let proximity = if item.node_id.as_ref() == target { 1.0 } else { 0.3 };
-    let base = 0.5 * 0.5 + 0.3 * proximity + 0.2 * 0.5;
+/// Annotation proximity per design §6.5:
+///   1.0  Node(target_id)
+///   0.8  File(target's file)
+///   0.7  Node(1-hop neighbor of target)
+///   0.6  Scope(tag matching target's path)
+///   0.5  File(neighbor's file)
+///   0.3  None (project-level)
+fn compute_proximity(
+    item: &CandidateItem,
+    target: Option<&NodeId>,
+    ctx: &ScoringContext,
+) -> f64 {
+    match item.anchor_type.as_deref() {
+        Some("node") => {
+            if item.node_id.as_ref() == target {
+                1.0
+            } else if item.node_id.as_ref().is_some_and(|id| ctx.one_hop_ids.contains(id)) {
+                0.7
+            } else {
+                0.5
+            }
+        }
+        Some("file") => {
+            if let Some(ref fp) = item.file_path {
+                if ctx.target_file.as_deref() == Some(fp) {
+                    0.8
+                } else if ctx.neighbor_files.contains(fp.as_str()) {
+                    0.5
+                } else {
+                    0.4
+                }
+            } else {
+                0.4
+            }
+        }
+        Some("scope") => 0.6,
+        _ => 0.3, // project-level (None)
+    }
+}
+
+/// Annotation: (0.5 * bm25 + 0.3 * proximity + 0.2 * recency) * (0.6 if stale else 1.0)
+fn score_annotation(item: &CandidateItem, target: Option<&NodeId>, ctx: &ScoringContext) -> f64 {
+    let bm25 = item.bm25_score.unwrap_or(0.5);
+    let proximity = compute_proximity(item, target, ctx);
+    let recency = item.timestamp
+        .map(|ts| recency_decay(ts))
+        .unwrap_or(0.5);
+    let base = 0.5 * bm25 + 0.3 * proximity + 0.2 * recency;
     let stale_penalty = if item.stale { 0.6 } else { 1.0 };
-    base * stale_penalty
+    (base * stale_penalty).clamp(0.0, 1.0)
 }
 
 /// DocChunk: 0.7 * bm25_doc + (0.3 if priority else 0.0)
 fn score_doc_chunk(item: &CandidateItem) -> f64 {
-    let bm25_estimate = 0.5;
+    let bm25 = item.bm25_score.unwrap_or(0.5);
     let priority_boost = if item.priority_doc { 0.3 } else { 0.0 };
-    0.7 * bm25_estimate + priority_boost
+    (0.7 * bm25 + priority_boost).clamp(0.0, 1.0)
 }
 
 /// NodeHistory: 0.6 * significance + 0.4 * (1.0 / version_distance)
-fn score_node_history(_item: &CandidateItem) -> f64 {
-    0.6 * 0.5 + 0.4 * 1.0
+/// Significance per design §6.5: signature=1.0, edge=0.7, body=0.4, docstring=0.2
+fn score_node_history(item: &CandidateItem) -> f64 {
+    let significance = item.change_significance.unwrap_or(0.4);
+    let distance = item.version_distance.unwrap_or(1).max(1) as f64;
+    (0.6 * significance + 0.4 * (1.0 / distance)).clamp(0.0, 1.0)
+}
+
+/// SessionActivity: 0.5 * recency + 0.5 * jaccard(activity_nodes, traversal_nodes)
+fn score_session_activity(item: &CandidateItem) -> f64 {
+    let recency = item.timestamp
+        .map(|ts| recency_decay(ts))
+        .unwrap_or(0.5);
+    // Jaccard computation would need traversal node set — approximate for now
+    0.5 * recency + 0.5 * 0.3
+}
+
+/// Shared recency decay: e^(-0.01 * hours_elapsed)
+fn recency_decay(timestamp_epoch_secs: i64) -> f64 {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64;
+    let elapsed_hours = (now - timestamp_epoch_secs).max(0) as f64 / 3600.0;
+    (-0.01 * elapsed_hours).exp()
 }
 
 #[cfg(test)]
@@ -120,21 +219,31 @@ mod tests {
         g
     }
 
-    #[test]
-    fn test_target_gets_max_score() {
-        let g = make_graph();
-        let mut items = vec![CandidateItem {
-            content: "fn target()".to_string(),
+    fn make_item(source: CandidateSource, node_id: Option<NodeId>) -> CandidateItem {
+        CandidateItem {
+            content: "test".to_string(),
             token_count: 3,
-            source: CandidateSource::Target,
-            node_id: Some(NodeId("t1".to_string())),
-            file_path: Some("src/lib.rs".to_string()),
+            source,
+            node_id,
+            file_path: None,
             stale: false,
             priority_doc: false,
             score: 0.0,
             pinned: false,
             group: None,
-        }];
+            anchor_type: None,
+            version_distance: None,
+            change_significance: None,
+            bm25_score: None,
+            timestamp: None,
+        }
+    }
+
+    #[test]
+    fn test_target_gets_max_score() {
+        let g = make_graph();
+        let mut items = vec![make_item(CandidateSource::Target, Some(NodeId("t1".to_string())))];
+        items[0].file_path = Some("src/lib.rs".to_string());
         score(&mut items, &g, Some(&NodeId("t1".to_string())), &[]);
         assert!((items[0].score - 1.0).abs() < f64::EPSILON);
     }
@@ -142,18 +251,7 @@ mod tests {
     #[test]
     fn test_signal_pinned() {
         let g = make_graph();
-        let mut items = vec![CandidateItem {
-            content: "[!] THRASHING".to_string(),
-            token_count: 4,
-            source: CandidateSource::BehavioralSignal,
-            node_id: Some(NodeId("t1".to_string())),
-            file_path: None,
-            stale: false,
-            priority_doc: false,
-            score: 0.0,
-            pinned: false,
-            group: None,
-        }];
+        let mut items = vec![make_item(CandidateSource::BehavioralSignal, Some(NodeId("t1".to_string())))];
         score(&mut items, &g, Some(&NodeId("t1".to_string())), &[]);
         assert!((items[0].score - 1.0).abs() < f64::EPSILON);
     }
@@ -163,23 +261,78 @@ mod tests {
         let g = make_graph();
         let target = NodeId("t1".to_string());
 
-        let mut fresh = CandidateItem {
-            content: "annotation".to_string(),
-            token_count: 3,
-            source: CandidateSource::Annotation,
-            node_id: Some(target.clone()),
-            file_path: None,
-            stale: false,
-            priority_doc: false,
-            score: 0.0,
-            pinned: false,
-            group: None,
-        };
+        let mut fresh = make_item(CandidateSource::Annotation, Some(target.clone()));
+        fresh.anchor_type = Some("node".to_string());
         let mut stale = fresh.clone();
         stale.stale = true;
 
         score(std::slice::from_mut(&mut fresh), &g, Some(&target), &[]);
         score(std::slice::from_mut(&mut stale), &g, Some(&target), &[]);
         assert!(fresh.score > stale.score);
+    }
+
+    #[test]
+    fn test_proximity_levels() {
+        let mut g = make_graph();
+        g.add_node(NodeWeight {
+            id: NodeId("n1".to_string()),
+            kind: NodeKind::Function,
+            name: "neighbor".to_string(),
+            file_path: PathBuf::from("src/other.rs"),
+            line_start: 1, line_end: 10,
+            signature: "fn neighbor()".to_string(),
+            signature_hash: "cc001122".to_string(),
+            docstring: None,
+            skeleton: "fn neighbor()".to_string(),
+            centrality: 0.1,
+            checksum: vec![0xBE, 0xEF],
+        });
+        g.add_edge(
+            &NodeId("t1".to_string()),
+            &NodeId("n1".to_string()),
+            crate::graph::types::EdgeWeight {
+                kind: crate::graph::types::EdgeKind::Calls,
+                weight: 1.0,
+                confidence: crate::graph::types::Confidence::Precise,
+            },
+        );
+
+        let target = NodeId("t1".to_string());
+        let ctx = build_scoring_context(&g, Some(&target));
+
+        // Node(target) → 1.0
+        let mut item = make_item(CandidateSource::Annotation, Some(target.clone()));
+        item.anchor_type = Some("node".to_string());
+        assert!((compute_proximity(&item, Some(&target), &ctx) - 1.0).abs() < f64::EPSILON);
+
+        // Node(1-hop neighbor) → 0.7
+        item.node_id = Some(NodeId("n1".to_string()));
+        assert!((compute_proximity(&item, Some(&target), &ctx) - 0.7).abs() < f64::EPSILON);
+
+        // File(target's file) → 0.8
+        let mut file_item = make_item(CandidateSource::Annotation, None);
+        file_item.anchor_type = Some("file".to_string());
+        file_item.file_path = Some("src/lib.rs".to_string());
+        assert!((compute_proximity(&file_item, Some(&target), &ctx) - 0.8).abs() < f64::EPSILON);
+
+        // None (project-level) → 0.3
+        let mut proj_item = make_item(CandidateSource::Annotation, None);
+        proj_item.anchor_type = None;
+        assert!((compute_proximity(&proj_item, Some(&target), &ctx) - 0.3).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_node_history_significance() {
+        let mut sig_change = make_item(CandidateSource::NodeHistory, Some(NodeId("t1".to_string())));
+        sig_change.change_significance = Some(1.0);
+        sig_change.version_distance = Some(1);
+
+        let mut body_change = make_item(CandidateSource::NodeHistory, Some(NodeId("t1".to_string())));
+        body_change.change_significance = Some(0.4);
+        body_change.version_distance = Some(2);
+
+        let sig_score = score_node_history(&sig_change);
+        let body_score = score_node_history(&body_change);
+        assert!(sig_score > body_score, "signature change should rank higher than body change");
     }
 }

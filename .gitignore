@@ -10,6 +10,7 @@ release/
 .idea/
 *.iml
 .vscode/
+.cursor/
 
 # OS
 .DS_Store

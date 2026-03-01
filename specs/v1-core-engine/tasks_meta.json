@@ -1,0 +1,562 @@
+{
+  "feature": "v1-core-engine",
+  "created": "2026-02-28T17:32:27+00:00",
+  "tasks": {
+    "T001": {
+      "description": "Create Cargo.toml with all 22 crate dependencies",
+      "files": "Cargo.toml",
+      "execution_mode": "ASYNC",
+      "status": "completed",
+      "agent_type": "general"
+    },
+    "T002": {
+      "description": "Create rust-toolchain.toml pinning stable Rust",
+      "files": "rust-toolchain.toml",
+      "execution_mode": "ASYNC",
+      "status": "completed",
+      "agent_type": "general"
+    },
+    "T003": {
+      "description": "Create .scavenger.toml.example reference config",
+      "files": ".scavenger.toml.example",
+      "execution_mode": "ASYNC",
+      "status": "completed",
+      "agent_type": "general"
+    },
+    "T004": {
+      "description": "Create src/main.rs with clap subcommand dispatch skeleton and all mod declarations",
+      "files": "src/main.rs",
+      "execution_mode": "ASYNC",
+      "status": "completed",
+      "agent_type": "general"
+    },
+    "T005": {
+      "description": "Create src/config.rs with .scavenger.toml loading, validation, range clamping",
+      "files": "src/config.rs",
+      "execution_mode": "ASYNC",
+      "status": "completed",
+      "agent_type": "general"
+    },
+    "T006": {
+      "description": "Implement src/db/mod.rs — SQLite connection management for per-branch and daemon_meta DBs with WAL PRAGMAs",
+      "files": "src/db/mod.rs",
+      "execution_mode": "ASYNC",
+      "status": "completed",
+      "agent_type": "general"
+    },
+    "T007": {
+      "description": "Implement src/db/schema.rs — all CREATE TABLE, FTS5 virtual tables, triggers, indexes, PRAGMA user_version migration, downgrade guard",
+      "files": "src/db/schema.rs",
+      "execution_mode": "SYNC",
+      "status": "completed",
+      "agent_type": "general"
+    },
+    "T008": {
+      "description": "Implement src/db/queries.rs — typed query helpers for nodes, edges, files, annotations, signals, session_log, doc_chunks",
+      "files": "src/db/queries.rs",
+      "execution_mode": "ASYNC",
+      "status": "completed",
+      "agent_type": "general"
+    },
+    "T009": {
+      "description": "Implement src/graph/types.rs — NodeWeight, EdgeWeight, NodeId, NodeKind enum (9 types), EdgeKind enum (7 types), Confidence enum",
+      "files": "src/graph/types.rs",
+      "execution_mode": "SYNC",
+      "status": "completed",
+      "agent_type": "general"
+    },
+    "T010": {
+      "description": "Implement src/graph/mod.rs — GraphState with StableGraph, Arc<RwLock<>>, reverse index HashMap, load from SQLite, save to SQLite, PageRank computation",
+      "files": "src/graph/mod.rs",
+      "execution_mode": "SYNC",
+      "status": "completed",
+      "agent_type": "general"
+    },
+    "T011": {
+      "description": "Implement src/graph/index.rs — tree-sitter symbol extraction for 15 languages, signature/docstring/skeleton generation, sig_hash, FTS5 token splitting via heck",
+      "files": "src/graph/index.rs",
+      "execution_mode": "SYNC",
+      "status": "completed",
+      "agent_type": "general"
+    },
+    "T012": {
+      "description": "Implement src/graph/doc_indexer.rs — markdown chunking at heading boundaries, sub-split at 100 lines, content_hash for incremental updates",
+      "files": "src/graph/doc_indexer.rs",
+      "execution_mode": "ASYNC",
+      "status": "completed",
+      "agent_type": "general"
+    },
+    "T013": {
+      "description": "Implement src/daemon/mod.rs — daemon main loop with tokio runtime, signal handling (SIGTERM/SIGINT), graceful shutdown with 5s drain",
+      "files": "src/daemon/mod.rs",
+      "execution_mode": "SYNC",
+      "status": "completed",
+      "agent_type": "general"
+    },
+    "T014": {
+      "description": "Implement src/daemon/socket.rs — UDS listener on daemon.sock, length-prefixed JSON protocol, concurrent request handling",
+      "files": "src/daemon/socket.rs",
+      "execution_mode": "SYNC",
+      "status": "completed",
+      "agent_type": "general"
+    },
+    "T015": {
+      "description": "Implement src/daemon/handlers.rs — request dispatch for capsule, hook_pre, hook_post, annotation CRUD, search_docs, status",
+      "files": "src/daemon/handlers.rs",
+      "execution_mode": "SYNC",
+      "status": "completed",
+      "agent_type": "general"
+    },
+    "T016": {
+      "description": "Implement src/hooks/register.rs — deep-merge hook and MCP bridge entries into .claude/settings.local.json with fs2 exclusive lock",
+      "files": "src/hooks/register.rs",
+      "execution_mode": "ASYNC",
+      "status": "completed",
+      "agent_type": "general"
+    },
+    "T017": {
+      "description": "Implement CLI init command in src/main.rs — mkdir .scavenger/ (mode 0700), bulk index, register hooks, register MCP, start daemon",
+      "files": "src/main.rs",
+      "execution_mode": "SYNC",
+      "status": "completed",
+      "agent_type": "general"
+    },
+    "T018": {
+      "description": "Implement 12-step daemon startup sequence — flock, PID, daemon_meta, branch detect, DB open, UDS, dirty check, freshness scan, graph load, PageRank, watcher, ready",
+      "files": "src/daemon/mod.rs,src/daemon/coordinator.rs",
+      "execution_mode": "SYNC",
+      "status": "completed",
+      "agent_type": "general"
+    },
+    "T019": {
+      "description": "Implement src/query/intent.rs — hybrid intent classifier (keyword priority, fuzzy match, BM25 fallback, default Understand), multi-intent 60/40 union",
+      "files": "src/query/intent.rs",
+      "execution_mode": "SYNC",
+      "status": "completed",
+      "agent_type": "general"
+    },
+    "T020": {
+      "description": "Implement src/query/search.rs — FTS5 BM25 query, sign-flip normalization, 0.6*bm25+0.4*centrality composition",
+      "files": "src/query/search.rs",
+      "execution_mode": "SYNC",
+      "status": "completed",
+      "agent_type": "general"
+    },
+    "T021": {
+      "description": "Implement src/query/mod.rs — query engine entry, strategy dispatch, traversal mapping per intent",
+      "files": "src/query/mod.rs",
+      "execution_mode": "SYNC",
+      "status": "completed",
+      "agent_type": "general"
+    },
+    "T022": {
+      "description": "Implement src/graph/traversal.rs — intent-driven BFS/DFS with hop limits, degree cap >50, node budget 100, builtins blocklist",
+      "files": "src/graph/traversal.rs",
+      "execution_mode": "SYNC",
+      "status": "completed",
+      "agent_type": "general"
+    },
+    "T023": {
+      "description": "Implement src/capsule/gather.rs — GATHER stage: collect candidates from all sources in parallel",
+      "files": "src/capsule/gather.rs",
+      "execution_mode": "SYNC",
+      "status": "completed",
+      "agent_type": "general"
+    },
+    "T024": {
+      "description": "Implement src/capsule/score.rs — SCORE stage: 6 per-source scoring formulas with recency decay",
+      "files": "src/capsule/score.rs",
+      "execution_mode": "SYNC",
+      "status": "completed",
+      "agent_type": "general"
+    },
+    "T025": {
+      "description": "Implement src/capsule/render.rs — PIN, TRIM, GROUP, RENDER stages: pinning logic, greedy budget fill, section ordering per FR-018",
+      "files": "src/capsule/render.rs",
+      "execution_mode": "SYNC",
+      "status": "completed",
+      "agent_type": "general"
+    },
+    "T026": {
+      "description": "Implement src/capsule/mod.rs — 6-stage pipeline orchestrator, token budget enforcement (8k default, 10% headroom)",
+      "files": "src/capsule/mod.rs",
+      "execution_mode": "SYNC",
+      "status": "completed",
+      "agent_type": "general"
+    },
+    "T027": {
+      "description": "Implement src/bridge/mod.rs — MCP bridge: stdio JSON-RPC to UDS translation via rmcp, 5 tool declarations with proc macros",
+      "files": "src/bridge/mod.rs",
+      "execution_mode": "SYNC",
+      "status": "completed",
+      "agent_type": "general",
+      "notes": "rmcp 0.17 #[tool_router]/#[tool_handler] server with 5 tools: get_capsule, read_annotations, write_annotation, delete_annotation, search_docs. Each forwards to daemon UDS."
+    },
+    "T028": {
+      "description": "Implement src/hooks/mod.rs — PreToolUse handler: stdin JSON parse, UDS capsule request, stdout additionalContext, exit 0 always, 100ms partial fallback",
+      "files": "src/hooks/mod.rs",
+      "execution_mode": "SYNC",
+      "status": "completed",
+      "agent_type": "general"
+    },
+    "T029": {
+      "description": "Implement src/daemon/watcher.rs — notify-debouncer-full file watcher, 300ms trailing-edge debounce, .gitignore via ignore crate, VCS deferral on .git/index.lock, branch-switch detection, file routing (md vs code)",
+      "files": "src/daemon/watcher.rs",
+      "execution_mode": "SYNC",
+      "status": "completed",
+      "agent_type": "general"
+    },
+    "T030": {
+      "description": "Implement 13-step re-indexing flow in src/graph/index.rs — collect old NodeIds, re-parse, build new nodes/edges, sig_hash, diff old vs new, orphan detection, skeleton gen, edge rebuild, reverse index update, cascade queue, PageRank defer, files table update",
+      "files": "src/graph/index.rs",
+      "execution_mode": "SYNC",
+      "status": "completed",
+      "agent_type": "general"
+    },
+    "T031": {
+      "description": "Implement split-phase concurrency in src/graph/index.rs — Phase 1 prep (no lock), Phase 2 swap (write lock ~5-15ms, SQLite-before-graph), Phase 3 deferred PageRank (read lock, once per batch)",
+      "files": "src/graph/index.rs",
+      "execution_mode": "SYNC",
+      "status": "completed",
+      "agent_type": "general"
+    },
+    "T032": {
+      "description": "Implement src/graph/similarity.rs — identity migration heuristic: 5-component weighted scoring (name 0.3, signature 0.25, body 0.25, edge neighborhood 0.15, file proximity 0.05), threshold 0.6, pending orphans buffer",
+      "files": "src/graph/similarity.rs",
+      "execution_mode": "SYNC",
+      "status": "completed",
+      "agent_type": "general"
+    },
+    "T033": {
+      "description": "Implement PostToolUse hook handler in src/hooks/mod.rs — stdin JSON parse, UDS enqueue re-index for Write/Edit/MultiEdit, stdout empty JSON, exit 0 always",
+      "files": "src/hooks/mod.rs",
+      "execution_mode": "ASYNC",
+      "status": "completed",
+      "agent_type": "general"
+    },
+    "T034": {
+      "description": "Implement cross-file edge staleness resolution — reverse index lookup, queue affected source files, lazy resolution on dangling edge capsule hit",
+      "files": "src/graph/index.rs",
+      "execution_mode": "SYNC",
+      "status": "completed",
+      "agent_type": "general"
+    },
+    "T035": {
+      "description": "Implement src/memory/versions.rs — Layer 1: node version history, last 5 snapshots, ordinal decay, version recording on re-index",
+      "files": "src/memory/versions.rs",
+      "execution_mode": "ASYNC",
+      "status": "completed",
+      "agent_type": "general"
+    },
+    "T036": {
+      "description": "Implement src/memory/annotations.rs — Layer 2: annotation CRUD, flexible anchoring (node/file/scope/None), staleness detection by anchor type, orphan cleanup (30-day)",
+      "files": "src/memory/annotations.rs",
+      "execution_mode": "SYNC",
+      "status": "completed",
+      "agent_type": "general"
+    },
+    "T037": {
+      "description": "Implement src/memory/signals.rs — Layer 3: behavioral signals storage, TTL pruning (48h or 2 sessions), signal emission from detectors",
+      "files": "src/memory/signals.rs",
+      "execution_mode": "ASYNC",
+      "status": "completed",
+      "agent_type": "general"
+    },
+    "T038": {
+      "description": "Implement src/memory/session.rs — Layer 3: session activity log (read/query/edit events), TTL pruning, session_id tracking",
+      "files": "src/memory/session.rs",
+      "execution_mode": "ASYNC",
+      "status": "completed",
+      "agent_type": "general"
+    },
+    "T039": {
+      "description": "Implement src/memory/antipattern.rs — 7 anti-pattern detectors with fire-once-at-N dedup HashSet: THRASHING (ring buffer, Levenshtein >0.9), DEAD_END, CYCLE_INTRODUCED, LARGE_BLAST_RADIUS, UNTESTED, INDEX_BLIND_SPOT, FAILED_SEARCH",
+      "files": "src/memory/antipattern.rs",
+      "execution_mode": "SYNC",
+      "status": "completed",
+      "agent_type": "general"
+    },
+    "T040": {
+      "description": "Implement src/memory/mod.rs — three-layer orchestration, annotation fork on cold start, annotation union-merge on merge commit",
+      "files": "src/memory/mod.rs",
+      "execution_mode": "SYNC",
+      "status": "completed",
+      "agent_type": "general"
+    },
+    "T041": {
+      "description": "Implement MCP tools write_annotation and delete_annotation in src/bridge/mod.rs — upsert logic, anchor resolution cascade (symbol FTS5 -> file -> scope -> None), disambiguation within 20%",
+      "files": "src/bridge/mod.rs",
+      "execution_mode": "SYNC",
+      "status": "completed",
+      "agent_type": "general"
+    },
+    "T042": {
+      "description": "Implement MCP tools read_annotations and session_summary in src/bridge/mod.rs — filter by anchor/tags/query, session summary mode",
+      "files": "src/bridge/mod.rs",
+      "execution_mode": "SYNC",
+      "status": "completed",
+      "agent_type": "general"
+    },
+    "T043": {
+      "description": "Implement src/daemon/coordinator.rs — ReindexCoordinator: warm switch state machine (set switching, update branch, close DB, open new, reload graph, freshness check, re-index stale, set ready)",
+      "files": "src/daemon/coordinator.rs",
+      "execution_mode": "SYNC",
+      "status": "completed",
+      "agent_type": "general"
+    },
+    "T044": {
+      "description": "Implement cold start in src/daemon/coordinator.rs — git diff based, copy parent DB, clear ephemeral data, preserve annotations, re-index changed files, PageRank, swap, set ready",
+      "files": "src/daemon/coordinator.rs",
+      "execution_mode": "SYNC",
+      "status": "completed",
+      "agent_type": "general"
+    },
+    "T045": {
+      "description": "Implement merge detection in src/daemon/coordinator.rs — git log -1 --format=%P HEAD, 2+ parents triggers annotation union-merge",
+      "files": "src/daemon/coordinator.rs",
+      "execution_mode": "SYNC",
+      "status": "completed",
+      "agent_type": "general"
+    },
+    "T046": {
+      "description": "Implement branch cleanup — delete per-branch index DB when branch is deleted (hourly check + startup scan)",
+      "files": "src/daemon/coordinator.rs",
+      "execution_mode": "ASYNC",
+      "status": "completed",
+      "agent_type": "general"
+    },
+    "T047": {
+      "description": "Implement branch-switch detection in src/daemon/watcher.rs — detect after VCS batch completes, trigger warm/cold switch via coordinator",
+      "files": "src/daemon/watcher.rs",
+      "execution_mode": "SYNC",
+      "status": "completed",
+      "agent_type": "general"
+    },
+    "T048": {
+      "description": "Implement src/graph/estimator.rs — per-tool without-index token estimates using files.raw_token_estimate, non-blocking, fail-silent",
+      "files": "src/graph/estimator.rs",
+      "execution_mode": "ASYNC",
+      "status": "completed",
+      "agent_type": "general"
+    },
+    "T049": {
+      "description": "Implement token logging in daemon handlers — log to token_log table in daemon_meta.db after each tool call",
+      "files": "src/daemon/handlers.rs",
+      "execution_mode": "ASYNC",
+      "status": "completed",
+      "agent_type": "general"
+    },
+    "T050": {
+      "description": "Implement CLI stats command — per-session and all-time token savings report, percentage savings, cost estimates from config pricing",
+      "files": "src/main.rs",
+      "execution_mode": "ASYNC",
+      "status": "completed",
+      "agent_type": "general"
+    },
+    "T051": {
+      "description": "Implement DiagnosticCheck trait and check registry in src/main.rs — trait with name(), category(), run(), 5 categories (Process, FileIntegrity, Config, Dependencies, Resources)",
+      "files": "src/main.rs",
+      "execution_mode": "ASYNC",
+      "status": "completed",
+      "agent_type": "general"
+    },
+    "T052": {
+      "description": "Implement individual doctor checks — daemon process, PID file, socket, DB integrity, hook registration, config validity, disk space, WAL size",
+      "files": "src/main.rs",
+      "execution_mode": "ASYNC",
+      "status": "completed",
+      "agent_type": "general"
+    },
+    "T053": {
+      "description": "Implement daemon log infrastructure — structured events to .scavenger/daemon.log, size rotation (10 MB, 2 rotated files), doctor log parsing",
+      "files": "src/daemon/mod.rs",
+      "execution_mode": "ASYNC",
+      "status": "completed",
+      "agent_type": "general"
+    },
+    "T054": {
+      "description": "Implement CLI doctor command — --verbose and --format=json flags, colored output respecting NO_COLOR, exit codes 0/1/2",
+      "files": "src/main.rs",
+      "execution_mode": "ASYNC",
+      "status": "completed",
+      "agent_type": "general"
+    },
+    "T055": {
+      "description": "Implement src/daemon/federation.rs — federated repo connections, validation (tables exist, user_version, quick_check), cache validation",
+      "files": "src/daemon/federation.rs",
+      "execution_mode": "SYNC",
+      "status": "completed",
+      "agent_type": "general"
+    },
+    "T056": {
+      "description": "Implement federation fan-out in src/daemon/federation.rs — read federated daemon_meta.db for current_branch, open branch DB read-only, query FTS5, merge results",
+      "files": "src/daemon/federation.rs",
+      "execution_mode": "SYNC",
+      "status": "completed",
+      "agent_type": "general"
+    },
+    "T057": {
+      "description": "Implement MCP search_docs tool with federation fan-out in src/bridge/mod.rs",
+      "files": "src/bridge/mod.rs",
+      "execution_mode": "ASYNC",
+      "status": "completed",
+      "agent_type": "general"
+    },
+    "T058": {
+      "description": "Implement CLI federate commands — add, remove, list, verify subcommands",
+      "files": "src/main.rs",
+      "execution_mode": "ASYNC",
+      "status": "completed",
+      "agent_type": "general"
+    },
+    "T059": {
+      "description": "Create tests/fixtures/ — sample multi-language projects with known symbol counts for test validation",
+      "files": "tests/fixtures/",
+      "execution_mode": "ASYNC",
+      "status": "completed",
+      "agent_type": "general"
+    },
+    "T060": {
+      "description": "Unit tests for db module — schema creation, migration, downgrade guard, PRAGMA verification",
+      "files": "tests/",
+      "execution_mode": "ASYNC",
+      "status": "completed",
+      "agent_type": "general"
+    },
+    "T061": {
+      "description": "Unit tests for graph module — node/edge CRUD, PageRank computation, reverse index correctness",
+      "files": "tests/",
+      "execution_mode": "ASYNC",
+      "status": "completed",
+      "agent_type": "general"
+    },
+    "T062": {
+      "description": "Unit tests for tree-sitter extraction — per-language symbol extraction for all 15 languages",
+      "files": "tests/",
+      "execution_mode": "SYNC",
+      "status": "completed",
+      "agent_type": "general"
+    },
+    "T063": {
+      "description": "Unit tests for query engine — intent detection, BM25 search ranking, traversal correctness",
+      "files": "tests/",
+      "execution_mode": "ASYNC",
+      "status": "completed",
+      "agent_type": "general"
+    },
+    "T064": {
+      "description": "Unit tests for memory module — annotation CRUD, staleness detection, version history, anti-pattern detectors",
+      "files": "tests/",
+      "execution_mode": "ASYNC",
+      "status": "completed",
+      "agent_type": "general"
+    },
+    "T065": {
+      "description": "Unit tests for capsule assembly — scoring formulas, budget enforcement, section ordering, stale markers",
+      "files": "tests/",
+      "execution_mode": "ASYNC",
+      "status": "completed",
+      "agent_type": "general"
+    },
+    "T066": {
+      "description": "Unit tests for similarity heuristic — weighted scoring, threshold matching, orphan buffer",
+      "files": "tests/",
+      "execution_mode": "ASYNC",
+      "status": "completed",
+      "agent_type": "general"
+    },
+    "T067": {
+      "description": "Integration test: init -> index -> capsule -> edit -> re-index -> verify capsule updated",
+      "files": "tests/integration/",
+      "execution_mode": "SYNC",
+      "status": "completed",
+      "agent_type": "general"
+    },
+    "T068": {
+      "description": "Integration test: branch create -> cold start -> edit -> switch back -> warm switch -> verify independent state",
+      "files": "tests/integration/",
+      "execution_mode": "SYNC",
+      "status": "completed",
+      "agent_type": "general"
+    },
+    "T069": {
+      "description": "Integration test: two MCP bridge sessions -> same daemon simultaneously",
+      "files": "tests/integration/",
+      "execution_mode": "ASYNC",
+      "status": "completed",
+      "agent_type": "general"
+    },
+    "T070": {
+      "description": "Performance validation: 5000-file project benchmarks for SC-001 through SC-008",
+      "files": "tests/integration/",
+      "execution_mode": "SYNC",
+      "status": "completed",
+      "agent_type": "general"
+    },
+    "T071": {
+      "description": "BM25 validation: 20+ representative queries on real codebase, evaluate ranking quality",
+      "files": "tests/integration/",
+      "execution_mode": "SYNC",
+      "status": "completed",
+      "agent_type": "general"
+    },
+    "T072": {
+      "description": "Implement remaining CLI commands — index, capsule, memory, graph stats, graph show, annotate, merge-annotations, hook pre-tool-use/post-tool-use",
+      "files": "src/main.rs",
+      "execution_mode": "ASYNC",
+      "status": "completed",
+      "agent_type": "general"
+    },
+    "T073": {
+      "description": "Documentation: README.md with installation, usage, configuration",
+      "files": "README.md",
+      "execution_mode": "ASYNC",
+      "status": "completed",
+      "agent_type": "general"
+    },
+    "T074": {
+      "description": "Binary size and release build validation — strip symbols, LTO if needed, verify <50MB",
+      "files": "Cargo.toml",
+      "execution_mode": "ASYNC",
+      "status": "completed",
+      "agent_type": "general",
+      "notes": "29MB release binary. LTO=true, strip=true, codegen-units=1 in [profile.release]."
+    },
+    "T075": {
+      "description": "Add mcp-bridge CLI subcommand to src/main.rs — starts rmcp stdio MCP server for Claude Code tool discovery",
+      "files": "src/main.rs",
+      "execution_mode": "SYNC",
+      "status": "completed",
+      "agent_type": "general"
+    },
+    "T076": {
+      "description": "Update src/hooks/register.rs to register MCP bridge server in Claude Code plugin config",
+      "files": "src/hooks/register.rs",
+      "execution_mode": "SYNC",
+      "status": "completed",
+      "agent_type": "general"
+    },
+    "T077": {
+      "description": "Integration tests for MCP bridge — tool discovery, round-trip for all 5 tools",
+      "files": "tests/integration/",
+      "execution_mode": "ASYNC",
+      "status": "completed",
+      "agent_type": "general"
+    },
+    "T078": {
+      "description": "Implement [BODY] section in src/capsule/render.rs — full body when remaining budget > 200 tokens",
+      "files": "src/capsule/render.rs",
+      "execution_mode": "ASYNC",
+      "status": "completed",
+      "agent_type": "general"
+    },
+    "T079": {
+      "description": "Kotlin grammar — research tree-sitter-kotlin 0.25 compatibility, resolve or document",
+      "files": "Cargo.toml,src/graph/index.rs",
+      "execution_mode": "ASYNC",
+      "status": "completed",
+      "agent_type": "general",
+      "notes": "tree-sitter-kotlin 0.3.8 requires tree-sitter <0.23, incompatible with our 0.25. No compatible version exists. Documented as known limitation in Cargo.toml and README.md."
+    }
+  }
+}

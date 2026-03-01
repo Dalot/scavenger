@@ -10,6 +10,7 @@ use crate::graph::index::ExtractedSymbol;
 pub struct SimilarityMatch {
     pub old_id: NodeId,
     pub new_id: NodeId,
+    #[allow(dead_code)]
     pub score: f64,
 }
 

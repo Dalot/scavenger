@@ -1,0 +1,7 @@
+# Mini-redis benchmark session — multi-turn explore/analyze/refactor
+# Target: tokio-rs/mini-redis (clone via setup.sh)
+# Pattern: explore a subsystem, analyze impact, execute a rename
+
+How does a SET command flow from the client connection to the database? Trace the full path: TCP read, frame parsing, command dispatch, and database write. Which structs and functions are involved at each stage?
+Which functions and structs would be affected if I renamed the Db struct to DataStore? Include all call sites, trait implementations, type aliases, and function signatures that reference it.
+Make that rename — change the Db struct to DataStore everywhere in the codebase, including all type references, function parameters, impl blocks, and doc comments.

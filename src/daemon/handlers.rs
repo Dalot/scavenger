@@ -8,7 +8,22 @@ use crate::db::queries;
 use crate::query;
 
 /// Dispatch an incoming JSON request to the appropriate handler.
+/// Extracts session_id from the request and detects changes (design §11.5).
 pub async fn dispatch(state: &Arc<DaemonState>, request: Value) -> Value {
+    // Session ID change detection: update if payload carries a different session_id
+    if let Some(incoming_session) = request.get("session_id").and_then(|v| v.as_str()) {
+        if !incoming_session.is_empty() {
+            let current = state.session_id.read().clone();
+            if current != incoming_session {
+                *state.session_id.write() = incoming_session.to_string();
+                super::daemon_log(&state.scavenger_dir, "session_change", &json!({
+                    "old_session": current,
+                    "new_session": incoming_session,
+                }));
+            }
+        }
+    }
+
     let method = request
         .get("method")
         .and_then(|v| v.as_str())

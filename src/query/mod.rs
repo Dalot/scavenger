@@ -40,6 +40,32 @@ pub fn resolve_target(
     }
 }
 
+#[allow(dead_code)]
+/// Resolve a scope tag to path prefixes using the [scopes] config section.
+/// Returns the set of NodeIds whose file_path matches any of the scope's path prefixes.
+pub fn resolve_scope(
+    graph: &GraphState,
+    config: &Config,
+    scope_tag: &str,
+) -> Vec<NodeId> {
+    let prefixes = match config.scopes.get(scope_tag) {
+        Some(crate::config::ScopeValue::Single(p)) => vec![p.as_str()],
+        Some(crate::config::ScopeValue::Multiple(ps)) => ps.iter().map(|s| s.as_str()).collect(),
+        None => return Vec::new(),
+    };
+
+    graph
+        .graph
+        .node_indices()
+        .filter_map(|idx| graph.graph.node_weight(idx))
+        .filter(|w| {
+            let path = w.file_path.to_string_lossy();
+            prefixes.iter().any(|prefix| path.starts_with(prefix) || path.contains(prefix))
+        })
+        .map(|w| w.id.clone())
+        .collect()
+}
+
 /// Run the full query pipeline: intent detection → search → traversal.
 pub fn run_query(
     conn: &Connection,

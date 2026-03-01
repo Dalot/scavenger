@@ -1,11 +1,15 @@
 use super::{CandidateItem, CandidateSource, OutputGroup};
 
 /// PIN stage: mark pinned items (target, behavioral signals, 1-hop structural).
+/// 1-hop callers/callees are semi-pinned: guaranteed included, signatures only.
 pub fn pin(candidates: &mut [CandidateItem]) {
     for item in candidates.iter_mut() {
         item.pinned = matches!(
             item.source,
-            CandidateSource::Target | CandidateSource::BehavioralSignal
+            CandidateSource::Target
+                | CandidateSource::BehavioralSignal
+                | CandidateSource::Caller
+                | CandidateSource::Callee
         );
     }
 }
@@ -72,10 +76,23 @@ pub fn group(candidates: &mut [CandidateItem]) {
     }
 }
 
+/// Target body information for [BODY] section inclusion.
+pub struct TargetBody {
+    pub file_path: String,
+    pub line_start: u32,
+    pub line_end: u32,
+    pub name: String,
+}
+
 /// RENDER stage: emit the final capsule text following section ordering per FR-018.
 /// Order: [!] → [TARGET] → [CALLERS] → [CALLEES] → [CONTEXT] → [DOCUMENTATION] → [BODY]
 /// Empty sections are omitted. Scores are NOT in output.
-pub fn render(candidates: &[CandidateItem], remaining_budget: u32) -> String {
+/// If `target_body` is provided and remaining budget > 200 tokens, the full body is appended.
+pub fn render(
+    candidates: &[CandidateItem],
+    remaining_budget: u32,
+    target_body: Option<&TargetBody>,
+) -> String {
     let section_order = [
         OutputGroup::Signal,
         OutputGroup::Target,
@@ -102,13 +119,33 @@ pub fn render(candidates: &[CandidateItem], remaining_budget: u32) -> String {
         sections.push(format!("{}\n{}", header, body.join("\n")));
     }
 
-    // [BODY] inclusion: if remaining budget > 200 tokens, could include body
-    // For now, [BODY] is a placeholder for future full-body inclusion
     if remaining_budget > 200 {
-        // Body inclusion deferred — would need the actual source body
+        if let Some(tb) = target_body {
+            if let Ok(body_text) = read_body_from_file(&tb.file_path, tb.line_start, tb.line_end) {
+                let body_tokens = (body_text.len() / 4) as u32;
+                if body_tokens <= remaining_budget {
+                    sections.push(format!("[BODY] {}\n{}", tb.name, body_text));
+                }
+            }
+        }
     }
 
     sections.join("\n\n")
+}
+
+fn read_body_from_file(
+    file_path: &str,
+    line_start: u32,
+    line_end: u32,
+) -> Result<String, std::io::Error> {
+    let content = std::fs::read_to_string(file_path)?;
+    let lines: Vec<&str> = content.lines().collect();
+    let start = (line_start as usize).saturating_sub(1).min(lines.len());
+    let end = (line_end as usize).min(lines.len());
+    if start >= end {
+        return Ok(String::new());
+    }
+    Ok(lines[start..end].join("\n"))
 }
 
 impl OutputGroup {
@@ -141,20 +178,27 @@ mod tests {
             score,
             pinned: false,
             group: None,
+            anchor_type: None,
+            version_distance: None,
+            change_significance: None,
+            bm25_score: None,
+            timestamp: None,
         }
     }
 
     #[test]
-    fn test_pin_marks_target_and_signals() {
+    fn test_pin_marks_target_signals_and_structural() {
         let mut items = vec![
             make_item(CandidateSource::Target, "fn target()", 3, 1.0),
             make_item(CandidateSource::BehavioralSignal, "[!] THRASHING", 4, 1.0),
             make_item(CandidateSource::Caller, "fn caller()", 3, 0.5),
+            make_item(CandidateSource::GraphNode, "fn other()", 3, 0.3),
         ];
         pin(&mut items);
-        assert!(items[0].pinned);
-        assert!(items[1].pinned);
-        assert!(!items[2].pinned);
+        assert!(items[0].pinned, "Target should be pinned");
+        assert!(items[1].pinned, "Signal should be pinned");
+        assert!(items[2].pinned, "Caller (semi-pinned) should be pinned");
+        assert!(!items[3].pinned, "Non-structural GraphNode should not be pinned");
     }
 
     #[test]
@@ -185,47 +229,34 @@ mod tests {
         assert_eq!(items[2].group, Some(OutputGroup::Documentation));
     }
 
+    fn full_item(source: CandidateSource, content: &str, score: f64, pinned: bool, group: OutputGroup) -> CandidateItem {
+        CandidateItem {
+            content: content.to_string(),
+            token_count: (content.len() / 4).max(1) as u32,
+            source,
+            node_id: None,
+            file_path: None,
+            stale: false,
+            priority_doc: false,
+            score,
+            pinned,
+            group: Some(group),
+            anchor_type: None,
+            version_distance: None,
+            change_significance: None,
+            bm25_score: None,
+            timestamp: None,
+        }
+    }
+
     #[test]
     fn test_render_section_ordering() {
         let items = vec![
-            CandidateItem {
-                content: "fn target()".to_string(),
-                token_count: 3,
-                source: CandidateSource::Target,
-                node_id: None,
-                file_path: None,
-                stale: false,
-                priority_doc: false,
-                score: 1.0,
-                pinned: true,
-                group: Some(OutputGroup::Target),
-            },
-            CandidateItem {
-                content: "[!] THRASHING: repeated edits".to_string(),
-                token_count: 5,
-                source: CandidateSource::BehavioralSignal,
-                node_id: None,
-                file_path: None,
-                stale: false,
-                priority_doc: false,
-                score: 1.0,
-                pinned: true,
-                group: Some(OutputGroup::Signal),
-            },
-            CandidateItem {
-                content: "fn caller()".to_string(),
-                token_count: 3,
-                source: CandidateSource::Caller,
-                node_id: None,
-                file_path: None,
-                stale: false,
-                priority_doc: false,
-                score: 0.5,
-                pinned: false,
-                group: Some(OutputGroup::Callers),
-            },
+            full_item(CandidateSource::Target, "fn target()", 1.0, true, OutputGroup::Target),
+            full_item(CandidateSource::BehavioralSignal, "[!] THRASHING: repeated edits", 1.0, true, OutputGroup::Signal),
+            full_item(CandidateSource::Caller, "fn caller()", 0.5, false, OutputGroup::Callers),
         ];
-        let output = render(&items, 1000);
+        let output = render(&items, 1000, None);
         let signal_pos = output.find("[!]").unwrap();
         let target_pos = output.find("[TARGET]").unwrap();
         let callers_pos = output.find("[CALLERS]").unwrap();
@@ -235,21 +266,50 @@ mod tests {
 
     #[test]
     fn test_render_omits_empty_sections() {
-        let items = vec![CandidateItem {
-            content: "fn target()".to_string(),
-            token_count: 3,
-            source: CandidateSource::Target,
-            node_id: None,
-            file_path: None,
-            stale: false,
-            priority_doc: false,
-            score: 1.0,
-            pinned: true,
-            group: Some(OutputGroup::Target),
-        }];
-        let output = render(&items, 1000);
+        let items = vec![
+            full_item(CandidateSource::Target, "fn target()", 1.0, true, OutputGroup::Target),
+        ];
+        let output = render(&items, 1000, None);
         assert!(output.contains("[TARGET]"));
         assert!(!output.contains("[CALLERS]"));
-        assert!(!output.contains("[!]"));
+    }
+
+    #[test]
+    fn test_render_body_inclusion_above_threshold() {
+        let tmp = tempfile::tempdir().unwrap();
+        let file_path = tmp.path().join("test.rs");
+        std::fs::write(&file_path, "fn hello() {\n    println!(\"hello\");\n}\n").unwrap();
+
+        let items = vec![
+            full_item(CandidateSource::Target, "fn hello()", 1.0, true, OutputGroup::Target),
+        ];
+
+        let tb = TargetBody {
+            file_path: file_path.to_string_lossy().to_string(),
+            line_start: 1,
+            line_end: 3,
+            name: "hello".to_string(),
+        };
+
+        let output = render(&items, 500, Some(&tb));
+        assert!(output.contains("[BODY] hello"), "should include [BODY] section: {output}");
+        assert!(output.contains("println!"), "body should include function content");
+    }
+
+    #[test]
+    fn test_render_body_not_included_below_threshold() {
+        let items = vec![
+            full_item(CandidateSource::Target, "fn hello()", 1.0, true, OutputGroup::Target),
+        ];
+
+        let tb = TargetBody {
+            file_path: "/nonexistent".to_string(),
+            line_start: 1,
+            line_end: 3,
+            name: "hello".to_string(),
+        };
+
+        let output = render(&items, 100, Some(&tb));
+        assert!(!output.contains("[BODY]"), "should not include [BODY] when budget <= 200");
     }
 }

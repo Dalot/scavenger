@@ -59,12 +59,33 @@ pub fn chunk_markdown(content: &str) -> Vec<DocChunk> {
     chunks
 }
 
+const SUB_SPLIT_THRESHOLD: usize = 200;
+
 fn emit_chunks(
     heading: &Option<String>,
     start_offset: usize,
     lines: &[&str],
     out: &mut Vec<DocChunk>,
 ) {
+    if lines.len() <= SUB_SPLIT_THRESHOLD {
+        let content = lines.join("\n");
+        if content.trim().is_empty() {
+            return;
+        }
+        let token_estimate = (content.len() / 4) as u32;
+        let hash = format!("{:x}", md5::compute(content.as_bytes()));
+        let content_hash = hash[..8].to_string();
+        out.push(DocChunk {
+            heading: heading.clone(),
+            start_line: start_offset as u32 + 1,
+            end_line: (start_offset + lines.len()) as u32,
+            content,
+            token_estimate,
+            content_hash,
+        });
+        return;
+    }
+
     for sub_chunk in lines.chunks(MAX_CHUNK_LINES) {
         let chunk_start_idx = out.len();
         let content = sub_chunk.join("\n");
@@ -170,11 +191,19 @@ mod tests {
     }
 
     #[test]
-    fn test_chunk_markdown_long_section() {
+    fn test_chunk_markdown_long_section_no_split() {
         let lines: Vec<String> = (0..150).map(|i| format!("Line {i}")).collect();
+        let content = format!("# Medium\n{}", lines.join("\n"));
+        let chunks = chunk_markdown(&content);
+        assert_eq!(chunks.len(), 1, "sections <= 200 lines should not be sub-split");
+    }
+
+    #[test]
+    fn test_chunk_markdown_long_section_splits() {
+        let lines: Vec<String> = (0..250).map(|i| format!("Line {i}")).collect();
         let content = format!("# Long\n{}", lines.join("\n"));
         let chunks = chunk_markdown(&content);
-        assert!(chunks.len() >= 2);
+        assert!(chunks.len() >= 3, "sections > 200 lines should be sub-split at 100-line chunks");
     }
 
     #[test]
