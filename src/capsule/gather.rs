@@ -40,7 +40,9 @@ fn new_candidate(
 }
 
 fn annotation_prefix(kind: &str, stale: bool) -> &'static str {
-    if stale { return "[STALE]"; }
+    if stale {
+        return "[STALE]";
+    }
     match kind {
         "strategy" => "[STRATEGY]",
         "pitfall" => "[PITFALL]",
@@ -78,7 +80,10 @@ pub fn gather(
         let one_hop = traversal::one_hop_neighbors(graph, target_id);
         for neighbor_id in &one_hop {
             if let Some(w) = graph.get_weight(neighbor_id) {
-                let is_caller = graph.callers_of(target_id).iter().any(|c| c.id == *neighbor_id);
+                let is_caller = graph
+                    .callers_of(target_id)
+                    .iter()
+                    .any(|c| c.id == *neighbor_id);
                 let source = if is_caller {
                     CandidateSource::Caller
                 } else {
@@ -98,7 +103,10 @@ pub fn gather(
 
         // Extended neighbors from query traversal
         for neighbor_id in &query_result.neighbor_ids {
-            if candidates.iter().any(|c| c.node_id.as_ref() == Some(neighbor_id)) {
+            if candidates
+                .iter()
+                .any(|c| c.node_id.as_ref() == Some(neighbor_id))
+            {
                 continue;
             }
             if let Some(w) = graph.get_weight(neighbor_id) {
@@ -147,16 +155,25 @@ fn gather_annotations(
     candidates: &mut Vec<CandidateItem>,
 ) {
     // Node-anchored annotations for the target
-    if let Ok(mut annotations) = crate::db::queries::get_annotations_for_anchor(
-        conn, "node", &target_id.0,
-    ) {
+    if let Ok(mut annotations) =
+        crate::db::queries::get_annotations_for_anchor(conn, "node", &target_id.0)
+    {
         if annotations.len() > DISTILL_THRESHOLD {
-            annotations.sort_by(|a, b| b.quality.partial_cmp(&a.quality).unwrap_or(std::cmp::Ordering::Equal));
+            annotations.sort_by(|a, b| {
+                b.quality
+                    .partial_cmp(&a.quality)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
             let overflow = annotations.len() - DISTILL_KEEP;
             let summary_text = format!("[+{overflow} more notes on {}]", target_id.0);
             let mut summary = new_candidate(
-                summary_text.clone(), estimate_tokens(&summary_text),
-                CandidateSource::Annotation, Some(target_id.clone()), None, false, false,
+                summary_text.clone(),
+                estimate_tokens(&summary_text),
+                CandidateSource::Annotation,
+                Some(target_id.clone()),
+                None,
+                false,
+                false,
             );
             summary.anchor_type = Some("node".to_string());
             candidates.push(summary);
@@ -166,8 +183,13 @@ fn gather_annotations(
             let prefix = annotation_prefix(&ann.kind, ann.stale);
             let content = format!("{prefix} {}", ann.text);
             let mut item = new_candidate(
-                content.clone(), estimate_tokens(&content),
-                CandidateSource::Annotation, Some(target_id.clone()), None, ann.stale, false,
+                content.clone(),
+                estimate_tokens(&content),
+                CandidateSource::Annotation,
+                Some(target_id.clone()),
+                None,
+                ann.stale,
+                false,
             );
             item.anchor_type = Some("node".to_string());
             item.timestamp = Some(ann.updated_at);
@@ -181,16 +203,25 @@ fn gather_annotations(
     // File-anchored annotations for the target's file
     if let Some(w) = graph.get_weight(target_id) {
         let file_str = w.file_path.to_string_lossy().to_string();
-        if let Ok(mut annotations) = crate::db::queries::get_annotations_for_anchor(
-            conn, "file", &file_str,
-        ) {
+        if let Ok(mut annotations) =
+            crate::db::queries::get_annotations_for_anchor(conn, "file", &file_str)
+        {
             if annotations.len() > DISTILL_THRESHOLD {
-                annotations.sort_by(|a, b| b.quality.partial_cmp(&a.quality).unwrap_or(std::cmp::Ordering::Equal));
+                annotations.sort_by(|a, b| {
+                    b.quality
+                        .partial_cmp(&a.quality)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                });
                 let overflow = annotations.len() - DISTILL_KEEP;
                 let summary_text = format!("[+{overflow} more notes on {file_str}]");
                 let mut summary = new_candidate(
-                    summary_text.clone(), estimate_tokens(&summary_text),
-                    CandidateSource::Annotation, None, Some(file_str.clone()), false, false,
+                    summary_text.clone(),
+                    estimate_tokens(&summary_text),
+                    CandidateSource::Annotation,
+                    None,
+                    Some(file_str.clone()),
+                    false,
+                    false,
                 );
                 summary.anchor_type = Some("file".to_string());
                 candidates.push(summary);
@@ -200,8 +231,13 @@ fn gather_annotations(
                 let prefix = annotation_prefix(&ann.kind, ann.stale);
                 let content = format!("{prefix} {}", ann.text);
                 let mut item = new_candidate(
-                    content.clone(), estimate_tokens(&content),
-                    CandidateSource::Annotation, None, Some(file_str.clone()), ann.stale, false,
+                    content.clone(),
+                    estimate_tokens(&content),
+                    CandidateSource::Annotation,
+                    None,
+                    Some(file_str.clone()),
+                    ann.stale,
+                    false,
                 );
                 item.anchor_type = Some("file".to_string());
                 item.timestamp = Some(ann.updated_at);
@@ -215,14 +251,23 @@ fn gather_annotations(
 
     // Project-level annotations (anchor_type IS NULL), capped at PROJECT_LEVEL_CAP
     if let Ok(mut annotations) = crate::db::queries::get_project_level_annotations(conn) {
-        annotations.sort_by(|a, b| b.quality.partial_cmp(&a.quality).unwrap_or(std::cmp::Ordering::Equal));
+        annotations.sort_by(|a, b| {
+            b.quality
+                .partial_cmp(&a.quality)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
         annotations.truncate(PROJECT_LEVEL_CAP);
         for ann in annotations {
             let prefix = annotation_prefix(&ann.kind, ann.stale);
             let content = format!("{prefix} {}", ann.text);
             let mut item = new_candidate(
-                content.clone(), estimate_tokens(&content),
-                CandidateSource::Annotation, None, None, ann.stale, false,
+                content.clone(),
+                estimate_tokens(&content),
+                CandidateSource::Annotation,
+                None,
+                None,
+                ann.stale,
+                false,
             );
             item.anchor_type = None;
             item.timestamp = Some(ann.updated_at);
@@ -234,11 +279,7 @@ fn gather_annotations(
     }
 }
 
-fn gather_node_history(
-    conn: &Connection,
-    target_id: &NodeId,
-    candidates: &mut Vec<CandidateItem>,
-) {
+fn gather_node_history(conn: &Connection, target_id: &NodeId, candidates: &mut Vec<CandidateItem>) {
     if let Some(sig_hash) = crate::db::queries::get_node_signature_hash(conn, &target_id.0) {
         if let Ok(versions) = crate::memory::versions::get_recent_versions(conn, &sig_hash, 5) {
             if versions.len() < 2 {
@@ -286,7 +327,10 @@ fn describe_change(
     older: &crate::memory::versions::VersionInfo,
 ) -> String {
     if newer.signature != older.signature {
-        format!("Signature changed: {} → {}", older.signature, newer.signature)
+        format!(
+            "Signature changed: {} → {}",
+            older.signature, newer.signature
+        )
     } else if newer.edges_json != older.edges_json {
         "Dependencies changed".to_string()
     } else {
@@ -323,7 +367,8 @@ fn gather_doc_chunks(
     }
 
     // FTS5 search for additional doc chunks
-    let search_query = query_result.search_results
+    let search_query = query_result
+        .search_results
         .first()
         .map(|r| r.node_id.0.clone())
         .unwrap_or_default();
@@ -410,15 +455,29 @@ mod tests {
         let (conn, graph) = setup();
         for i in 0..4 {
             crate::db::queries::insert_annotation(
-                &conn, &format!("a{i}"), Some("node"), Some("n1"),
-                &format!("note {i}"), None, "fact", None, 1000 + i,
-            ).unwrap();
+                &conn,
+                &format!("a{i}"),
+                Some("node"),
+                Some("n1"),
+                &format!("note {i}"),
+                None,
+                "fact",
+                None,
+                1000 + i,
+            )
+            .unwrap();
         }
 
         let mut candidates = Vec::new();
         gather_annotations(&conn, &graph, &NodeId("n1".to_string()), &mut candidates);
-        let ann_count = candidates.iter().filter(|c| c.source == CandidateSource::Annotation).count();
-        assert_eq!(ann_count, 4, "4 annotations should pass through without distillation");
+        let ann_count = candidates
+            .iter()
+            .filter(|c| c.source == CandidateSource::Annotation)
+            .count();
+        assert_eq!(
+            ann_count, 4,
+            "4 annotations should pass through without distillation"
+        );
     }
 
     #[test]
@@ -426,22 +485,42 @@ mod tests {
         let (conn, graph) = setup();
         for i in 0..8 {
             crate::db::queries::insert_annotation(
-                &conn, &format!("a{i}"), Some("node"), Some("n1"),
-                &format!("note {i}"), None, "fact", None, 1000 + i,
-            ).unwrap();
+                &conn,
+                &format!("a{i}"),
+                Some("node"),
+                Some("n1"),
+                &format!("note {i}"),
+                None,
+                "fact",
+                None,
+                1000 + i,
+            )
+            .unwrap();
         }
 
         let mut candidates = Vec::new();
         gather_annotations(&conn, &graph, &NodeId("n1".to_string()), &mut candidates);
-        let ann_items: Vec<_> = candidates.iter()
-            .filter(|c| c.source == CandidateSource::Annotation && c.anchor_type.as_deref() == Some("node"))
+        let ann_items: Vec<_> = candidates
+            .iter()
+            .filter(|c| {
+                c.source == CandidateSource::Annotation && c.anchor_type.as_deref() == Some("node")
+            })
             .collect();
 
         // 3 full items + 1 summary = 4
-        assert_eq!(ann_items.len(), 4, "should have 3 distilled + 1 summary, got {}", ann_items.len());
+        assert_eq!(
+            ann_items.len(),
+            4,
+            "should have 3 distilled + 1 summary, got {}",
+            ann_items.len()
+        );
 
         let summary = ann_items.iter().find(|c| c.content.contains("[+")).unwrap();
-        assert!(summary.content.contains("[+5 more notes on n1]"), "summary should mention overflow count: {}", summary.content);
+        assert!(
+            summary.content.contains("[+5 more notes on n1]"),
+            "summary should mention overflow count: {}",
+            summary.content
+        );
     }
 
     #[test]
@@ -449,17 +528,31 @@ mod tests {
         let (conn, graph) = setup();
         for i in 0..6 {
             crate::db::queries::insert_annotation(
-                &conn, &format!("p{i}"), None, None,
-                &format!("project note {i}"), None, "fact", None, 1000 + i,
-            ).unwrap();
+                &conn,
+                &format!("p{i}"),
+                None,
+                None,
+                &format!("project note {i}"),
+                None,
+                "fact",
+                None,
+                1000 + i,
+            )
+            .unwrap();
         }
 
         let mut candidates = Vec::new();
         gather_annotations(&conn, &graph, &NodeId("n1".to_string()), &mut candidates);
-        let project_items: Vec<_> = candidates.iter()
+        let project_items: Vec<_> = candidates
+            .iter()
             .filter(|c| c.source == CandidateSource::Annotation && c.anchor_type.is_none())
             .collect();
-        assert_eq!(project_items.len(), 3, "project-level should be capped at 3, got {}", project_items.len());
+        assert_eq!(
+            project_items.len(),
+            3,
+            "project-level should be capped at 3, got {}",
+            project_items.len()
+        );
     }
 
     #[test]

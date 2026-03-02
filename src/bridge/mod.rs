@@ -3,10 +3,10 @@ use std::path::PathBuf;
 use rmcp::handler::server::tool::ToolRouter;
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{ServerCapabilities, ServerInfo};
-use rmcp::{tool, tool_handler, tool_router, ServerHandler};
+use rmcp::{ServerHandler, tool, tool_handler, tool_router};
 use schemars::JsonSchema;
 use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use crate::daemon::socket::send_request;
 
@@ -114,10 +114,7 @@ impl ScavengerBridge {
             return Err(err.to_string());
         }
 
-        let capsule_text = resp
-            .get("capsule")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
+        let capsule_text = resp.get("capsule").and_then(|v| v.as_str()).unwrap_or("");
         Ok(capsule_text.to_string())
     }
 
@@ -220,10 +217,7 @@ impl ScavengerBridge {
         name = "search_docs",
         description = "Search indexed documentation files (CLAUDE.md, README.md, docs/**/*.md). Use to find design rationale, architecture decisions, or project conventions without loading entire documentation files."
     )]
-    async fn search_docs(
-        &self,
-        params: Parameters<SearchDocsParams>,
-    ) -> Result<String, String> {
+    async fn search_docs(&self, params: Parameters<SearchDocsParams>) -> Result<String, String> {
         let p = params.0;
         let mut req = json!({
             "method": "search_docs",
@@ -256,9 +250,7 @@ impl ServerHandler for ScavengerBridge {
 
 /// Start the MCP bridge as a stdio JSON-RPC server.
 /// If the daemon isn't running, spawns it and waits for the socket to appear.
-pub async fn run_mcp_bridge(
-    scavenger_dir: PathBuf,
-) -> Result<(), Box<dyn std::error::Error>> {
+pub async fn run_mcp_bridge(scavenger_dir: PathBuf) -> Result<(), Box<dyn std::error::Error>> {
     use rmcp::ServiceExt;
 
     let socket_path = scavenger_dir.join("daemon.sock");

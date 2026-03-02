@@ -1,8 +1,8 @@
 // T062: Unit tests for tree-sitter extraction — all 15 languages.
 
-use std::path::Path;
 use scavenger::graph::index::parse_file;
 use scavenger::graph::types::NodeKind;
+use std::path::Path;
 
 fn assert_extracts(ext: &str, src: &str, min_symbols: usize) {
     let path_str = format!("test.{ext}");
@@ -17,62 +17,110 @@ fn assert_extracts(ext: &str, src: &str, min_symbols: usize) {
 
 #[test]
 fn test_rust_extraction() {
-    assert_extracts("rs", "fn hello() {}\nstruct Point { x: f64, y: f64 }\nenum Color { Red, Blue }", 3);
+    assert_extracts(
+        "rs",
+        "fn hello() {}\nstruct Point { x: f64, y: f64 }\nenum Color { Red, Blue }",
+        3,
+    );
 }
 
 #[test]
 fn test_python_extraction() {
-    assert_extracts("py", "def greet(name):\n    pass\n\nclass Animal:\n    def speak(self):\n        pass", 2);
+    assert_extracts(
+        "py",
+        "def greet(name):\n    pass\n\nclass Animal:\n    def speak(self):\n        pass",
+        2,
+    );
 }
 
 #[test]
 fn test_typescript_extraction() {
-    assert_extracts("ts", "interface Shape { area(): number }\nfunction draw(s: Shape) {}\nclass Circle implements Shape { area() { return 0; } }", 3);
+    assert_extracts(
+        "ts",
+        "interface Shape { area(): number }\nfunction draw(s: Shape) {}\nclass Circle implements Shape { area() { return 0; } }",
+        3,
+    );
 }
 
 #[test]
 fn test_javascript_extraction() {
-    assert_extracts("js", "function add(a, b) { return a + b; }\nclass Calculator { multiply(a, b) { return a * b; } }", 2);
+    assert_extracts(
+        "js",
+        "function add(a, b) { return a + b; }\nclass Calculator { multiply(a, b) { return a * b; } }",
+        2,
+    );
 }
 
 #[test]
 fn test_go_extraction() {
-    assert_extracts("go", "package main\ntype Point struct { X float64; Y float64 }\nfunc NewPoint(x, y float64) Point { return Point{x, y} }", 2);
+    assert_extracts(
+        "go",
+        "package main\ntype Point struct { X float64; Y float64 }\nfunc NewPoint(x, y float64) Point { return Point{x, y} }",
+        2,
+    );
 }
 
 #[test]
 fn test_java_extraction() {
-    assert_extracts("java", "class Greeter { public void greet(String name) {} }\nenum Day { MON, TUE }", 2);
+    assert_extracts(
+        "java",
+        "class Greeter { public void greet(String name) {} }\nenum Day { MON, TUE }",
+        2,
+    );
 }
 
 #[test]
 fn test_cpp_extraction() {
-    assert_extracts("cpp", "class Vector { public: int x, y; };\nvoid draw(Vector v) {}", 2);
+    assert_extracts(
+        "cpp",
+        "class Vector { public: int x, y; };\nvoid draw(Vector v) {}",
+        2,
+    );
 }
 
 #[test]
 fn test_c_extraction() {
-    assert_extracts("c", "struct Point { int x; int y; };\nvoid draw(struct Point p) {}", 2);
+    assert_extracts(
+        "c",
+        "struct Point { int x; int y; };\nvoid draw(struct Point p) {}",
+        2,
+    );
 }
 
 #[test]
 fn test_ruby_extraction() {
-    assert_extracts("rb", "class Dog\n  def bark\n    puts 'woof'\n  end\nend\ndef greet(name)\n  puts name\nend", 2);
+    assert_extracts(
+        "rb",
+        "class Dog\n  def bark\n    puts 'woof'\n  end\nend\ndef greet(name)\n  puts name\nend",
+        2,
+    );
 }
 
 #[test]
 fn test_php_extraction() {
-    assert_extracts("php", "<?php\nclass User { public function getName() { return ''; } }\nfunction hello() {}", 2);
+    assert_extracts(
+        "php",
+        "<?php\nclass User { public function getName() { return ''; } }\nfunction hello() {}",
+        2,
+    );
 }
 
 #[test]
 fn test_csharp_extraction() {
-    assert_extracts("cs", "class Widget { void Render() {} }\nenum Size { Small, Large }", 2);
+    assert_extracts(
+        "cs",
+        "class Widget { void Render() {} }\nenum Size { Small, Large }",
+        2,
+    );
 }
 
 #[test]
 fn test_swift_extraction() {
-    assert_extracts("swift", "class Vehicle { func drive() {} }\nfunc park(v: Vehicle) {}", 2);
+    assert_extracts(
+        "swift",
+        "class Vehicle { func drive() {} }\nfunc park(v: Vehicle) {}",
+        2,
+    );
 }
 
 #[test]

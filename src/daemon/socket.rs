@@ -5,8 +5,8 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::UnixListener;
 use tokio::sync::watch;
 
-use super::handlers;
 use super::DaemonState;
+use super::handlers;
 
 /// Listen on a Unix Domain Socket, dispatching JSON requests to handlers.
 /// Protocol: length-prefixed JSON (4-byte big-endian length prefix).

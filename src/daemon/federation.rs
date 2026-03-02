@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use rusqlite::Connection;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use crate::db::queries;
 
@@ -82,12 +82,7 @@ impl FederationManager {
     }
 
     /// Search nodes across all federated repos via FTS5.
-    pub fn search_nodes(
-        &self,
-        query: &str,
-        limit: u32,
-        timeout: Duration,
-    ) -> Vec<FederatedResult> {
+    pub fn search_nodes(&self, query: &str, limit: u32, timeout: Duration) -> Vec<FederatedResult> {
         let mut results = Vec::new();
         let start = Instant::now();
 

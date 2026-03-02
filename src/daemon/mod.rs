@@ -13,7 +13,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use parking_lot::{Mutex, RwLock};
 use tokio::signal;
 use tokio::sync::watch;
-use tracing_subscriber::{fmt, prelude::*, EnvFilter};
+use tracing_subscriber::{EnvFilter, fmt, prelude::*};
 
 use crate::config::Config;
 use crate::db;
@@ -339,7 +339,8 @@ async fn handle_watch_events(
                     let file_str = file.to_string_lossy().to_string();
                     match watcher::route_file(file) {
                         FileRoute::Code => {
-                            let _span = tracing::info_span!("reindex_file", file = %file_str).entered();
+                            let _span =
+                                tracing::info_span!("reindex_file", file = %file_str).entered();
 
                             let prep = {
                                 let db_guard = state.branch_db.lock();
@@ -382,7 +383,9 @@ async fn handle_watch_events(
                             if let Ok(content) = std::fs::read_to_string(file) {
                                 let db_guard = state.branch_db.lock();
                                 if let Some(ref conn) = *db_guard {
-                                    if let Err(e) = doc_indexer::index_doc_file(conn, &file_str, &content) {
+                                    if let Err(e) =
+                                        doc_indexer::index_doc_file(conn, &file_str, &content)
+                                    {
                                         tracing::warn!(file = %file_str, error = %e, "doc reindex failed");
                                     }
                                 }

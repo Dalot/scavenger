@@ -1,10 +1,10 @@
 // T065: Unit tests for capsule assembly — scoring, budget, ordering.
 
 use rusqlite::Connection;
-use scavenger::db::schema;
-use scavenger::graph::types::*;
-use scavenger::graph::GraphState;
 use scavenger::config::Config;
+use scavenger::db::schema;
+use scavenger::graph::GraphState;
+use scavenger::graph::types::*;
 use scavenger::query::QueryResult;
 use scavenger::query::intent::{Intent, IntentResult};
 use std::path::PathBuf;
@@ -31,11 +31,20 @@ fn setup() -> (Connection, GraphState) {
     g.add_node(w);
 
     scavenger::db::queries::upsert_node(
-        &conn, "n1", NodeKind::Function, "target_fn", "src/main.rs",
-        1, 20, "fn target_fn(x: i32) -> bool", "aabb0011",
+        &conn,
+        "n1",
+        NodeKind::Function,
+        "target_fn",
+        "src/main.rs",
+        1,
+        20,
+        "fn target_fn(x: i32) -> bool",
+        "aabb0011",
         Some("A target function for testing"),
-        "fn target_fn(x: i32) -> bool", &[0xDE, 0xAD],
-    ).unwrap();
+        "fn target_fn(x: i32) -> bool",
+        &[0xDE, 0xAD],
+    )
+    .unwrap();
 
     (conn, g)
 }
@@ -70,7 +79,11 @@ fn test_capsule_respects_budget() {
     };
 
     let small = scavenger::capsule::assemble(&conn, &g, &config, &qr, Some(100));
-    assert!(small.token_count <= 100 + 50, "should roughly respect budget, got {}", small.token_count);
+    assert!(
+        small.token_count <= 100 + 50,
+        "should roughly respect budget, got {}",
+        small.token_count
+    );
 }
 
 #[test]

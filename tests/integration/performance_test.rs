@@ -1,8 +1,8 @@
 // T070: Performance validation — index time, capsule latency.
 
-use std::time::Instant;
 use scavenger::db;
-use scavenger::graph::{index, GraphState};
+use scavenger::graph::{GraphState, index};
+use std::time::Instant;
 
 #[test]
 fn test_bulk_index_under_5_seconds() {
@@ -32,9 +32,19 @@ fn test_bulk_index_under_5_seconds() {
     let stats = index::bulk_index(&conn, &mut g, &files).unwrap();
     let elapsed = start.elapsed();
 
-    assert!(stats.symbols_extracted >= 500, "expected >=500 symbols, got {}", stats.symbols_extracted);
-    assert!(elapsed.as_secs() < 5, "bulk index took {elapsed:?}, expected < 5s");
-    eprintln!("Bulk index: {} symbols in {elapsed:?}", stats.symbols_extracted);
+    assert!(
+        stats.symbols_extracted >= 500,
+        "expected >=500 symbols, got {}",
+        stats.symbols_extracted
+    );
+    assert!(
+        elapsed.as_secs() < 5,
+        "bulk index took {elapsed:?}, expected < 5s"
+    );
+    eprintln!(
+        "Bulk index: {} symbols in {elapsed:?}",
+        stats.symbols_extracted
+    );
 }
 
 #[test]
@@ -65,7 +75,10 @@ fn test_capsule_latency_under_200ms() {
     let elapsed = start.elapsed();
 
     assert!(!capsule.text.is_empty());
-    assert!(elapsed.as_millis() < 200, "capsule generation took {elapsed:?}, expected < 200ms");
+    assert!(
+        elapsed.as_millis() < 200,
+        "capsule generation took {elapsed:?}, expected < 200ms"
+    );
     eprintln!("Capsule: {} tokens in {elapsed:?}", capsule.token_count);
 }
 
@@ -98,6 +111,9 @@ fn test_incremental_reindex_under_500ms() {
     let _stats = index::incremental_reindex_swap(&conn, &mut g, prep).unwrap();
     let elapsed = start.elapsed();
 
-    assert!(elapsed.as_millis() < 500, "incremental reindex took {elapsed:?}, expected < 500ms");
+    assert!(
+        elapsed.as_millis() < 500,
+        "incremental reindex took {elapsed:?}, expected < 500ms"
+    );
     eprintln!("Incremental reindex: {elapsed:?}");
 }

@@ -197,9 +197,15 @@ mod tests {
     #[test]
     fn test_node_kind_roundtrip() {
         for kind in [
-            NodeKind::Function, NodeKind::Method, NodeKind::Class,
-            NodeKind::Interface, NodeKind::Type, NodeKind::Enum,
-            NodeKind::ExportedVar, NodeKind::Module, NodeKind::File,
+            NodeKind::Function,
+            NodeKind::Method,
+            NodeKind::Class,
+            NodeKind::Interface,
+            NodeKind::Type,
+            NodeKind::Enum,
+            NodeKind::ExportedVar,
+            NodeKind::Module,
+            NodeKind::File,
         ] {
             assert_eq!(NodeKind::from_str(kind.as_str()), Some(kind));
         }
@@ -208,8 +214,12 @@ mod tests {
     #[test]
     fn test_edge_kind_roundtrip() {
         for kind in [
-            EdgeKind::Imports, EdgeKind::Calls, EdgeKind::TypeRef,
-            EdgeKind::Extends, EdgeKind::Implements, EdgeKind::Exports,
+            EdgeKind::Imports,
+            EdgeKind::Calls,
+            EdgeKind::TypeRef,
+            EdgeKind::Extends,
+            EdgeKind::Implements,
+            EdgeKind::Exports,
             EdgeKind::Contains,
         ] {
             assert_eq!(EdgeKind::from_str(kind.as_str()), Some(kind));
@@ -218,7 +228,11 @@ mod tests {
 
     #[test]
     fn test_confidence_roundtrip() {
-        for c in [Confidence::Precise, Confidence::Heuristic, Confidence::Speculative] {
+        for c in [
+            Confidence::Precise,
+            Confidence::Heuristic,
+            Confidence::Speculative,
+        ] {
             assert_eq!(Confidence::from_str(c.as_str()), Some(c));
         }
     }

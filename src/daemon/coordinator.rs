@@ -5,14 +5,16 @@ use crate::db::queries;
 use crate::graph::index;
 use crate::memory;
 
-use super::{detect_branch, DaemonState, ReindexState};
+use super::{DaemonState, ReindexState, detect_branch};
 
 /// ReindexCoordinator: handles branch detection, DB open/close, and freshness scanning.
 pub struct ReindexCoordinator;
 
 impl ReindexCoordinator {
     /// Warm switch: branch already has an index DB.
-    pub fn check_branch_switch(state: &Arc<DaemonState>) -> Result<bool, Box<dyn std::error::Error>> {
+    pub fn check_branch_switch(
+        state: &Arc<DaemonState>,
+    ) -> Result<bool, Box<dyn std::error::Error>> {
         let new_branch = detect_branch(&state.project_root);
         let current = state.current_branch.read().clone();
 
@@ -130,13 +132,17 @@ impl ReindexCoordinator {
             return Ok(());
         }
 
-        eprintln!("Merge commit detected ({} parents), triggering annotation merge", parent_hashes.len());
+        eprintln!(
+            "Merge commit detected ({} parents), triggering annotation merge",
+            parent_hashes.len()
+        );
 
         // Find source branches from reflog
         let source_branches = find_merged_branches(&state.project_root);
         for source_branch in &source_branches {
             let indexes_dir = state.scavenger_dir.join("indexes");
-            let sanitized = source_branch.replace(['/', '\\', ':', '*', '?', '"', '<', '>', '|'], "_");
+            let sanitized =
+                source_branch.replace(['/', '\\', ':', '*', '?', '"', '<', '>', '|'], "_");
             let source_db_path = indexes_dir.join(format!("{sanitized}.db"));
 
             if source_db_path.exists() {
@@ -162,7 +168,9 @@ impl ReindexCoordinator {
 
     /// Perform a freshness scan: compare filesystem state against indexed files.
     #[allow(dead_code)]
-    pub fn freshness_scan(state: &Arc<DaemonState>) -> Result<FreshnessResult, Box<dyn std::error::Error>> {
+    pub fn freshness_scan(
+        state: &Arc<DaemonState>,
+    ) -> Result<FreshnessResult, Box<dyn std::error::Error>> {
         *state.reindex_state.write() = ReindexState::Indexing;
 
         let source_files = index::collect_source_files(&state.project_root);
@@ -172,7 +180,10 @@ impl ReindexCoordinator {
             let db_guard = state.branch_db.lock();
             let Some(ref conn) = *db_guard else {
                 *state.reindex_state.write() = ReindexState::Ready;
-                return Ok(FreshnessResult { stale_count: 0, reindexed: 0 });
+                return Ok(FreshnessResult {
+                    stale_count: 0,
+                    reindexed: 0,
+                });
             };
 
             for path in &source_files {
@@ -214,7 +225,9 @@ impl ReindexCoordinator {
     /// Branch cleanup: delete DB files for branches that no longer exist.
     /// Compares on-disk index files against `git branch` output.
     #[allow(dead_code)]
-    pub fn cleanup_deleted_branches(state: &Arc<DaemonState>) -> Result<u64, Box<dyn std::error::Error>> {
+    pub fn cleanup_deleted_branches(
+        state: &Arc<DaemonState>,
+    ) -> Result<u64, Box<dyn std::error::Error>> {
         let live_branches = list_git_branches(&state.project_root);
         let live_sanitized: std::collections::HashSet<String> = live_branches
             .iter()
@@ -227,7 +240,8 @@ impl ReindexCoordinator {
         }
 
         let current = state.current_branch.read().clone();
-        let current_sanitized = current.replace(['/', '\\', ':', '*', '?', '"', '<', '>', '|'], "_");
+        let current_sanitized =
+            current.replace(['/', '\\', ':', '*', '?', '"', '<', '>', '|'], "_");
 
         let mut cleaned = 0u64;
         for entry in std::fs::read_dir(&indexes_dir)?.flatten() {
@@ -257,14 +271,12 @@ fn git_diff_files(project_root: &std::path::Path, base_branch: &str) -> Vec<std:
         .output();
 
     match output {
-        Ok(out) if out.status.success() => {
-            String::from_utf8_lossy(&out.stdout)
-                .lines()
-                .filter(|l| !l.is_empty())
-                .map(|l| project_root.join(l.trim()))
-                .filter(|p| p.exists())
-                .collect()
-        }
+        Ok(out) if out.status.success() => String::from_utf8_lossy(&out.stdout)
+            .lines()
+            .filter(|l| !l.is_empty())
+            .map(|l| project_root.join(l.trim()))
+            .filter(|p| p.exists())
+            .collect(),
         _ => {
             // Fallback: index all source files
             index::collect_source_files(project_root)
@@ -282,13 +294,11 @@ fn find_merged_branches(project_root: &std::path::Path) -> Vec<String> {
         .output();
 
     let parent_hashes: Vec<String> = match parents_output {
-        Ok(out) if out.status.success() => {
-            String::from_utf8_lossy(&out.stdout)
-                .trim()
-                .split_whitespace()
-                .map(|s| s.to_string())
-                .collect()
-        }
+        Ok(out) if out.status.success() => String::from_utf8_lossy(&out.stdout)
+            .trim()
+            .split_whitespace()
+            .map(|s| s.to_string())
+            .collect(),
         _ => return Vec::new(),
     };
 
@@ -300,7 +310,12 @@ fn find_merged_branches(project_root: &std::path::Path) -> Vec<String> {
     let mut branches = Vec::new();
     for parent_hash in &parent_hashes[1..] {
         let output = std::process::Command::new("git")
-            .args(["branch", "--points-at", parent_hash, "--format=%(refname:short)"])
+            .args([
+                "branch",
+                "--points-at",
+                parent_hash,
+                "--format=%(refname:short)",
+            ])
             .current_dir(project_root)
             .output();
 
@@ -328,13 +343,11 @@ fn list_git_branches(project_root: &std::path::Path) -> Vec<String> {
         .output();
 
     match output {
-        Ok(out) if out.status.success() => {
-            String::from_utf8_lossy(&out.stdout)
-                .lines()
-                .filter(|l| !l.is_empty())
-                .map(|l| l.trim().to_string())
-                .collect()
-        }
+        Ok(out) if out.status.success() => String::from_utf8_lossy(&out.stdout)
+            .lines()
+            .filter(|l| !l.is_empty())
+            .map(|l| l.trim().to_string())
+            .collect(),
         _ => Vec::new(),
     }
 }

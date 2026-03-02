@@ -144,8 +144,12 @@ impl Config {
         self.budget.default = clamp_warn("budget.default", self.budget.default, 1000, 100_000);
         self.traversal.degree_cap =
             clamp_warn("traversal.degree_cap", self.traversal.degree_cap, 5, 500);
-        self.traversal.node_budget =
-            clamp_warn("traversal.node_budget", self.traversal.node_budget, 10, 10_000);
+        self.traversal.node_budget = clamp_warn(
+            "traversal.node_budget",
+            self.traversal.node_budget,
+            10,
+            10_000,
+        );
         self.analytics.session_retention_days = clamp_warn(
             "analytics.session_retention_days",
             self.analytics.session_retention_days,
@@ -157,14 +161,10 @@ impl Config {
 
 fn clamp_warn(field: &str, value: u32, min: u32, max: u32) -> u32 {
     if value < min {
-        eprintln!(
-            "Config: {field}={value} is below minimum {min}, using {min}."
-        );
+        eprintln!("Config: {field}={value} is below minimum {min}, using {min}.");
         min
     } else if value > max {
-        eprintln!(
-            "Config: {field}={value} is above maximum {max}, using {max}."
-        );
+        eprintln!("Config: {field}={value} is above maximum {max}, using {max}.");
         max
     } else {
         value

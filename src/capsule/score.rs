@@ -43,26 +43,21 @@ pub fn score(
                 score_graph_node(item, graph, max_centrality, &bm25_map)
             }
 
-            CandidateSource::Annotation => {
-                score_annotation(item, target, &ctx)
-            }
+            CandidateSource::Annotation => score_annotation(item, target, &ctx),
 
-            CandidateSource::DocChunk => {
-                score_doc_chunk(item)
-            }
+            CandidateSource::DocChunk => score_doc_chunk(item),
 
-            CandidateSource::NodeHistory => {
-                score_node_history(item)
-            }
+            CandidateSource::NodeHistory => score_node_history(item),
 
-            CandidateSource::SessionActivity => {
-                score_session_activity(item)
-            }
+            CandidateSource::SessionActivity => score_session_activity(item),
         };
     }
 }
 
-fn build_scoring_context<'a>(graph: &'a GraphState, target: Option<&'a NodeId>) -> ScoringContext<'a> {
+fn build_scoring_context<'a>(
+    graph: &'a GraphState,
+    target: Option<&'a NodeId>,
+) -> ScoringContext<'a> {
     let target_file = target
         .and_then(|t| graph.get_weight(t))
         .map(|w| w.file_path.to_string_lossy().to_string());
@@ -81,7 +76,11 @@ fn build_scoring_context<'a>(graph: &'a GraphState, target: Option<&'a NodeId>) 
         }
     }
 
-    ScoringContext { target_file, one_hop_ids, neighbor_files }
+    ScoringContext {
+        target_file,
+        one_hop_ids,
+        neighbor_files,
+    }
 }
 
 /// GraphNode: 0.4 * centrality + 0.6 * bm25
@@ -115,16 +114,16 @@ fn score_graph_node(
 ///   0.6  Scope(tag matching target's path)
 ///   0.5  File(neighbor's file)
 ///   0.3  None (project-level)
-fn compute_proximity(
-    item: &CandidateItem,
-    target: Option<&NodeId>,
-    ctx: &ScoringContext,
-) -> f64 {
+fn compute_proximity(item: &CandidateItem, target: Option<&NodeId>, ctx: &ScoringContext) -> f64 {
     match item.anchor_type.as_deref() {
         Some("node") => {
             if item.node_id.as_ref() == target {
                 1.0
-            } else if item.node_id.as_ref().is_some_and(|id| ctx.one_hop_ids.contains(id)) {
+            } else if item
+                .node_id
+                .as_ref()
+                .is_some_and(|id| ctx.one_hop_ids.contains(id))
+            {
                 0.7
             } else {
                 0.5
@@ -152,9 +151,7 @@ fn compute_proximity(
 fn score_annotation(item: &CandidateItem, target: Option<&NodeId>, ctx: &ScoringContext) -> f64 {
     let bm25 = item.bm25_score.unwrap_or(0.5);
     let proximity = compute_proximity(item, target, ctx);
-    let recency = item.timestamp
-        .map(|ts| recency_decay(ts))
-        .unwrap_or(0.5);
+    let recency = item.timestamp.map(|ts| recency_decay(ts)).unwrap_or(0.5);
     let quality = item.quality.unwrap_or(0.5);
     let base = 0.4 * bm25 + 0.25 * proximity + 0.15 * recency + 0.2 * quality;
     let stale_penalty = if item.stale { 0.6 } else { 1.0 };
@@ -184,9 +181,7 @@ fn score_node_history(item: &CandidateItem) -> f64 {
 
 /// SessionActivity: 0.5 * recency + 0.5 * jaccard(activity_nodes, traversal_nodes)
 fn score_session_activity(item: &CandidateItem) -> f64 {
-    let recency = item.timestamp
-        .map(|ts| recency_decay(ts))
-        .unwrap_or(0.5);
+    let recency = item.timestamp.map(|ts| recency_decay(ts)).unwrap_or(0.5);
     // Jaccard computation would need traversal node set — approximate for now
     0.5 * recency + 0.5 * 0.3
 }
@@ -252,7 +247,10 @@ mod tests {
     #[test]
     fn test_target_gets_max_score() {
         let g = make_graph();
-        let mut items = vec![make_item(CandidateSource::Target, Some(NodeId("t1".to_string())))];
+        let mut items = vec![make_item(
+            CandidateSource::Target,
+            Some(NodeId("t1".to_string())),
+        )];
         items[0].file_path = Some("src/lib.rs".to_string());
         score(&mut items, &g, Some(&NodeId("t1".to_string())), &[]);
         assert!((items[0].score - 1.0).abs() < f64::EPSILON);
@@ -261,7 +259,10 @@ mod tests {
     #[test]
     fn test_signal_pinned() {
         let g = make_graph();
-        let mut items = vec![make_item(CandidateSource::BehavioralSignal, Some(NodeId("t1".to_string())))];
+        let mut items = vec![make_item(
+            CandidateSource::BehavioralSignal,
+            Some(NodeId("t1".to_string())),
+        )];
         score(&mut items, &g, Some(&NodeId("t1".to_string())), &[]);
         assert!((items[0].score - 1.0).abs() < f64::EPSILON);
     }
@@ -289,7 +290,8 @@ mod tests {
             kind: NodeKind::Function,
             name: "neighbor".to_string(),
             file_path: PathBuf::from("src/other.rs"),
-            line_start: 1, line_end: 10,
+            line_start: 1,
+            line_end: 10,
             signature: "fn neighbor()".to_string(),
             signature_hash: "cc001122".to_string(),
             docstring: None,
@@ -346,7 +348,12 @@ mod tests {
 
         score(std::slice::from_mut(&mut pitfall), &g, Some(&target), &[]);
         score(std::slice::from_mut(&mut fact), &g, Some(&target), &[]);
-        assert!(pitfall.score > fact.score, "pitfall ({}) should rank higher than fact ({})", pitfall.score, fact.score);
+        assert!(
+            pitfall.score > fact.score,
+            "pitfall ({}) should rank higher than fact ({})",
+            pitfall.score,
+            fact.score
+        );
     }
 
     #[test]
@@ -364,7 +371,12 @@ mod tests {
 
         score(std::slice::from_mut(&mut context), &g, Some(&target), &[]);
         score(std::slice::from_mut(&mut fact), &g, Some(&target), &[]);
-        assert!(context.score < fact.score, "context ({}) should rank lower than fact ({})", context.score, fact.score);
+        assert!(
+            context.score < fact.score,
+            "context ({}) should rank lower than fact ({})",
+            context.score,
+            fact.score
+        );
     }
 
     #[test]
@@ -382,27 +394,40 @@ mod tests {
 
         score(std::slice::from_mut(&mut high_q), &g, Some(&target), &[]);
         score(std::slice::from_mut(&mut low_q), &g, Some(&target), &[]);
-        assert!(high_q.score > low_q.score, "high quality ({}) should rank higher than low quality ({})", high_q.score, low_q.score);
+        assert!(
+            high_q.score > low_q.score,
+            "high quality ({}) should rank higher than low quality ({})",
+            high_q.score,
+            low_q.score
+        );
     }
 
     #[test]
     fn test_scoring_weights_sum_to_one() {
         let sum: f64 = 0.4 + 0.25 + 0.15 + 0.2;
-        assert!((sum - 1.0).abs() < f64::EPSILON, "weights should sum to 1.0, got {sum}");
+        assert!(
+            (sum - 1.0).abs() < f64::EPSILON,
+            "weights should sum to 1.0, got {sum}"
+        );
     }
 
     #[test]
     fn test_node_history_significance() {
-        let mut sig_change = make_item(CandidateSource::NodeHistory, Some(NodeId("t1".to_string())));
+        let mut sig_change =
+            make_item(CandidateSource::NodeHistory, Some(NodeId("t1".to_string())));
         sig_change.change_significance = Some(1.0);
         sig_change.version_distance = Some(1);
 
-        let mut body_change = make_item(CandidateSource::NodeHistory, Some(NodeId("t1".to_string())));
+        let mut body_change =
+            make_item(CandidateSource::NodeHistory, Some(NodeId("t1".to_string())));
         body_change.change_significance = Some(0.4);
         body_change.version_distance = Some(2);
 
         let sig_score = score_node_history(&sig_change);
         let body_score = score_node_history(&body_change);
-        assert!(sig_score > body_score, "signature change should rank higher than body change");
+        assert!(
+            sig_score > body_score,
+            "signature change should rank higher than body change"
+        );
     }
 }

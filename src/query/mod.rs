@@ -18,11 +18,7 @@ pub struct QueryResult {
 }
 
 /// Resolve the target node from file + optional symbol name.
-pub fn resolve_target(
-    graph: &GraphState,
-    file: &str,
-    symbol: Option<&str>,
-) -> Option<NodeId> {
+pub fn resolve_target(graph: &GraphState, file: &str, symbol: Option<&str>) -> Option<NodeId> {
     if let Some(sym_name) = symbol {
         graph
             .graph
@@ -43,11 +39,7 @@ pub fn resolve_target(
 #[allow(dead_code)]
 /// Resolve a scope tag to path prefixes using the [scopes] config section.
 /// Returns the set of NodeIds whose file_path matches any of the scope's path prefixes.
-pub fn resolve_scope(
-    graph: &GraphState,
-    config: &Config,
-    scope_tag: &str,
-) -> Vec<NodeId> {
+pub fn resolve_scope(graph: &GraphState, config: &Config, scope_tag: &str) -> Vec<NodeId> {
     let prefixes = match config.scopes.get(scope_tag) {
         Some(crate::config::ScopeValue::Single(p)) => vec![p.as_str()],
         Some(crate::config::ScopeValue::Multiple(ps)) => ps.iter().map(|s| s.as_str()).collect(),
@@ -60,7 +52,9 @@ pub fn resolve_scope(
         .filter_map(|idx| graph.graph.node_weight(idx))
         .filter(|w| {
             let path = w.file_path.to_string_lossy();
-            prefixes.iter().any(|prefix| path.starts_with(prefix) || path.contains(prefix))
+            prefixes
+                .iter()
+                .any(|prefix| path.starts_with(prefix) || path.contains(prefix))
         })
         .map(|w| w.id.clone())
         .collect()
@@ -82,12 +76,9 @@ pub fn run_query(
 
     let target = resolve_target(graph, file, symbol);
 
-    let search_query = query
-        .or(symbol)
-        .unwrap_or("");
+    let search_query = query.or(symbol).unwrap_or("");
 
-    let search_results = search::search(conn, graph, search_query, 50)
-        .unwrap_or_default();
+    let search_results = search::search(conn, graph, search_query, 50).unwrap_or_default();
 
     let neighbor_ids = if let Some(ref target_id) = target {
         collect_neighbors(graph, target_id, &intent_result, config)
@@ -113,14 +104,16 @@ fn collect_neighbors(
     let node_budget = config.traversal.node_budget as usize;
     let degree_cap = config.traversal.degree_cap as usize;
 
-    let mut primary = traversal_for_intent(
-        graph, target, &intent.primary, node_budget, degree_cap,
-    );
+    let mut primary = traversal_for_intent(graph, target, &intent.primary, node_budget, degree_cap);
 
     if let Some(ref secondary_intent) = intent.secondary {
         let secondary_budget = (node_budget as f64 * intent.secondary_weight) as usize;
         let secondary = traversal_for_intent(
-            graph, target, secondary_intent, secondary_budget, degree_cap,
+            graph,
+            target,
+            secondary_intent,
+            secondary_budget,
+            degree_cap,
         );
         let primary_budget = (node_budget as f64 * intent.primary_weight) as usize;
         primary.truncate(primary_budget);
@@ -148,7 +141,14 @@ fn traversal_for_intent(
         Intent::Debug => {
             // Reverse BFS (callers): 3 hops up, 2 down
             let mut result = bfs(graph, target, Direction::Incoming, 3, budget, degree_cap);
-            let down = bfs(graph, target, Direction::Outgoing, 2, budget.saturating_sub(result.len()), degree_cap);
+            let down = bfs(
+                graph,
+                target,
+                Direction::Outgoing,
+                2,
+                budget.saturating_sub(result.len()),
+                degree_cap,
+            );
             for id in down {
                 if !result.contains(&id) {
                     result.push(id);
@@ -162,9 +162,23 @@ fn traversal_for_intent(
         }
         Intent::Understand => {
             // Bidirectional BFS: 2 hops each direction
-            let incoming = bfs(graph, target, Direction::Incoming, 2, budget / 2, degree_cap);
+            let incoming = bfs(
+                graph,
+                target,
+                Direction::Incoming,
+                2,
+                budget / 2,
+                degree_cap,
+            );
             let mut result = incoming;
-            let outgoing = bfs(graph, target, Direction::Outgoing, 2, budget.saturating_sub(result.len()), degree_cap);
+            let outgoing = bfs(
+                graph,
+                target,
+                Direction::Outgoing,
+                2,
+                budget.saturating_sub(result.len()),
+                degree_cap,
+            );
             for id in outgoing {
                 if !result.contains(&id) {
                     result.push(id);
@@ -178,9 +192,23 @@ fn traversal_for_intent(
         }
         Intent::Review => {
             // Bidirectional BFS: 2 hops all
-            let incoming = bfs(graph, target, Direction::Incoming, 2, budget / 2, degree_cap);
+            let incoming = bfs(
+                graph,
+                target,
+                Direction::Incoming,
+                2,
+                budget / 2,
+                degree_cap,
+            );
             let mut result = incoming;
-            let outgoing = bfs(graph, target, Direction::Outgoing, 2, budget.saturating_sub(result.len()), degree_cap);
+            let outgoing = bfs(
+                graph,
+                target,
+                Direction::Outgoing,
+                2,
+                budget.saturating_sub(result.len()),
+                degree_cap,
+            );
             for id in outgoing {
                 if !result.contains(&id) {
                     result.push(id);
@@ -200,8 +228,8 @@ fn bfs(
     budget: usize,
     degree_cap: usize,
 ) -> Vec<NodeId> {
-    use std::collections::{HashSet, VecDeque};
     use petgraph::visit::EdgeRef;
+    use std::collections::{HashSet, VecDeque};
 
     let Some(start_idx) = graph.get_index(start) else {
         return Vec::new();
@@ -229,10 +257,7 @@ fn bfs(
             continue;
         }
 
-        let neighbors: Vec<_> = graph
-            .graph
-            .edges_directed(idx, direction)
-            .collect();
+        let neighbors: Vec<_> = graph.graph.edges_directed(idx, direction).collect();
 
         // Skip high-degree utility nodes
         if neighbors.len() > degree_cap {
@@ -301,7 +326,14 @@ mod tests {
         g.add_edge(&NodeId("a".into()), &NodeId("b".into()), make_edge());
         g.add_edge(&NodeId("b".into()), &NodeId("c".into()), make_edge());
 
-        let result = bfs(&g, &NodeId("a".into()), petgraph::Direction::Outgoing, 2, 100, 50);
+        let result = bfs(
+            &g,
+            &NodeId("a".into()),
+            petgraph::Direction::Outgoing,
+            2,
+            100,
+            50,
+        );
         assert_eq!(result.len(), 2);
     }
 
@@ -315,7 +347,14 @@ mod tests {
             g.add_edge(&NodeId("a".into()), &NodeId(id), make_edge());
         }
 
-        let result = bfs(&g, &NodeId("a".into()), petgraph::Direction::Outgoing, 2, 5, 50);
+        let result = bfs(
+            &g,
+            &NodeId("a".into()),
+            petgraph::Direction::Outgoing,
+            2,
+            5,
+            50,
+        );
         assert!(result.len() <= 5);
     }
 }

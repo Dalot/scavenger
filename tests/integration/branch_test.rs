@@ -2,7 +2,7 @@
 
 use rusqlite::Connection;
 use scavenger::db::{self, queries, schema};
-use scavenger::graph::{index, GraphState};
+use scavenger::graph::{GraphState, index};
 use scavenger::memory;
 
 #[test]
@@ -41,7 +41,18 @@ fn test_annotation_fork_between_branches() {
     std::fs::create_dir_all(scav_dir.join("indexes")).unwrap();
 
     let parent_conn = db::open_branch_db(&scav_dir, "main").unwrap();
-    queries::insert_annotation(&parent_conn, "a1", Some("node"), Some("n1"), "parent note", None, "fact", None, 1000).unwrap();
+    queries::insert_annotation(
+        &parent_conn,
+        "a1",
+        Some("node"),
+        Some("n1"),
+        "parent note",
+        None,
+        "fact",
+        None,
+        1000,
+    )
+    .unwrap();
 
     let child_conn = db::open_branch_db(&scav_dir, "feature-x").unwrap();
     let count = memory::MemoryManager::fork_annotations(&parent_conn, &child_conn).unwrap();
@@ -53,10 +64,12 @@ fn test_annotation_fork_between_branches() {
     assert_eq!(anns[0].text, "parent note");
 
     // Modify child annotation
-    child_conn.execute(
-        "UPDATE annotations SET text = 'child modified' WHERE id = 'a1'",
-        [],
-    ).unwrap();
+    child_conn
+        .execute(
+            "UPDATE annotations SET text = 'child modified' WHERE id = 'a1'",
+            [],
+        )
+        .unwrap();
 
     // Verify parent is unaffected
     let parent_anns = queries::get_annotations_for_anchor(&parent_conn, "node", "n1").unwrap();
@@ -72,9 +85,35 @@ fn test_annotation_merge_dedup() {
     let source = db::open_branch_db(&scav_dir, "source").unwrap();
     let target = db::open_branch_db(&scav_dir, "target").unwrap();
 
-    let hash = scavenger::memory::annotations::compute_content_hash(Some("node"), Some("n1"), "shared note");
-    queries::insert_annotation(&source, "a1", Some("node"), Some("n1"), "shared note", None, "fact", Some(&hash), 1000).unwrap();
-    queries::insert_annotation(&target, "a2", Some("node"), Some("n1"), "shared note", None, "fact", Some(&hash), 1000).unwrap();
+    let hash = scavenger::memory::annotations::compute_content_hash(
+        Some("node"),
+        Some("n1"),
+        "shared note",
+    );
+    queries::insert_annotation(
+        &source,
+        "a1",
+        Some("node"),
+        Some("n1"),
+        "shared note",
+        None,
+        "fact",
+        Some(&hash),
+        1000,
+    )
+    .unwrap();
+    queries::insert_annotation(
+        &target,
+        "a2",
+        Some("node"),
+        Some("n1"),
+        "shared note",
+        None,
+        "fact",
+        Some(&hash),
+        1000,
+    )
+    .unwrap();
 
     let result = memory::MemoryManager::merge_annotations(&source, &target).unwrap();
     assert_eq!(result.deduped, 1, "same anchor+text should dedup");

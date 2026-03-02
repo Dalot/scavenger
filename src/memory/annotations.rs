@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 use rusqlite::Connection;
-use sha2::{Sha256, Digest};
+use sha2::{Digest, Sha256};
 
 use crate::db::queries;
 
@@ -83,7 +83,10 @@ pub fn upsert_annotation(
     // Content-hash dedup: if identical annotation exists, bump quality and return it
     if let Ok(Some(existing_id)) = queries::find_annotation_by_content_hash(conn, &hash) {
         let _ = queries::update_annotation_quality(conn, &existing_id, 0.1);
-        return Ok(UpsertResult { id: existing_id, deduplicated: true });
+        return Ok(UpsertResult {
+            id: existing_id,
+            deduplicated: true,
+        });
     }
 
     // Try update by ID first
@@ -93,10 +96,23 @@ pub fn upsert_annotation(
     )?;
 
     if updated == 0 {
-        queries::insert_annotation(conn, id, at_str, anchor_value, text, tags, kind.as_str(), Some(&hash), now)?;
+        queries::insert_annotation(
+            conn,
+            id,
+            at_str,
+            anchor_value,
+            text,
+            tags,
+            kind.as_str(),
+            Some(&hash),
+            now,
+        )?;
     }
 
-    Ok(UpsertResult { id: id.to_string(), deduplicated: false })
+    Ok(UpsertResult {
+        id: id.to_string(),
+        deduplicated: false,
+    })
 }
 
 #[derive(Debug, Clone)]
@@ -204,7 +220,10 @@ pub fn search_fts(
 }
 
 fn normalize_text(text: &str) -> String {
-    text.split_whitespace().collect::<Vec<_>>().join(" ").to_lowercase()
+    text.split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_lowercase()
 }
 
 pub fn compute_content_hash(
@@ -267,7 +286,16 @@ mod tests {
     #[test]
     fn test_create_and_read_annotation() {
         let conn = setup_db();
-        upsert_annotation(&conn, "a1", Some(AnchorType::Node), Some("nid"), "test note", None, AnnotationKind::Fact).unwrap();
+        upsert_annotation(
+            &conn,
+            "a1",
+            Some(AnchorType::Node),
+            Some("nid"),
+            "test note",
+            None,
+            AnnotationKind::Fact,
+        )
+        .unwrap();
         let annotations = read_by_anchor(&conn, "node", "nid").unwrap();
         assert_eq!(annotations.len(), 1);
         assert_eq!(annotations[0].text, "test note");
@@ -277,8 +305,26 @@ mod tests {
     #[test]
     fn test_update_annotation() {
         let conn = setup_db();
-        upsert_annotation(&conn, "a1", Some(AnchorType::File), Some("/test.rs"), "v1", None, AnnotationKind::Fact).unwrap();
-        upsert_annotation(&conn, "a1", Some(AnchorType::File), Some("/test.rs"), "v2", None, AnnotationKind::Fact).unwrap();
+        upsert_annotation(
+            &conn,
+            "a1",
+            Some(AnchorType::File),
+            Some("/test.rs"),
+            "v1",
+            None,
+            AnnotationKind::Fact,
+        )
+        .unwrap();
+        upsert_annotation(
+            &conn,
+            "a1",
+            Some(AnchorType::File),
+            Some("/test.rs"),
+            "v2",
+            None,
+            AnnotationKind::Fact,
+        )
+        .unwrap();
         let annotations = read_by_anchor(&conn, "file", "/test.rs").unwrap();
         assert_eq!(annotations.len(), 1);
         assert_eq!(annotations[0].text, "v2");
@@ -287,7 +333,16 @@ mod tests {
     #[test]
     fn test_delete_annotation() {
         let conn = setup_db();
-        upsert_annotation(&conn, "a1", Some(AnchorType::Project), None, "note", None, AnnotationKind::Fact).unwrap();
+        upsert_annotation(
+            &conn,
+            "a1",
+            Some(AnchorType::Project),
+            None,
+            "note",
+            None,
+            AnnotationKind::Fact,
+        )
+        .unwrap();
         assert!(delete_annotation(&conn, "a1").unwrap());
         assert!(!delete_annotation(&conn, "a1").unwrap());
     }
@@ -295,7 +350,16 @@ mod tests {
     #[test]
     fn test_kind_defaults_to_fact() {
         let conn = setup_db();
-        upsert_annotation(&conn, "a1", Some(AnchorType::Node), Some("n1"), "note", None, AnnotationKind::Fact).unwrap();
+        upsert_annotation(
+            &conn,
+            "a1",
+            Some(AnchorType::Node),
+            Some("n1"),
+            "note",
+            None,
+            AnnotationKind::Fact,
+        )
+        .unwrap();
         let annotations = read_by_anchor(&conn, "node", "n1").unwrap();
         assert_eq!(annotations[0].kind, "fact");
     }
@@ -303,7 +367,16 @@ mod tests {
     #[test]
     fn test_kind_round_trip() {
         let conn = setup_db();
-        upsert_annotation(&conn, "a1", Some(AnchorType::Node), Some("n1"), "watch out!", None, AnnotationKind::Pitfall).unwrap();
+        upsert_annotation(
+            &conn,
+            "a1",
+            Some(AnchorType::Node),
+            Some("n1"),
+            "watch out!",
+            None,
+            AnnotationKind::Pitfall,
+        )
+        .unwrap();
         let annotations = read_by_anchor(&conn, "node", "n1").unwrap();
         assert_eq!(annotations[0].kind, "pitfall");
     }
@@ -311,7 +384,10 @@ mod tests {
     #[test]
     fn test_kind_from_str_unknown_defaults() {
         assert_eq!(AnnotationKind::from_str("bogus"), AnnotationKind::Fact);
-        assert_eq!(AnnotationKind::from_str("strategy"), AnnotationKind::Strategy);
+        assert_eq!(
+            AnnotationKind::from_str("strategy"),
+            AnnotationKind::Strategy
+        );
     }
 
     #[test]
@@ -331,8 +407,26 @@ mod tests {
     #[test]
     fn test_dedup_returns_existing_id() {
         let conn = setup_db();
-        let r1 = upsert_annotation(&conn, "a1", Some(AnchorType::Node), Some("n1"), "same note", None, AnnotationKind::Fact).unwrap();
-        let r2 = upsert_annotation(&conn, "a2", Some(AnchorType::Node), Some("n1"), "same note", None, AnnotationKind::Fact).unwrap();
+        let r1 = upsert_annotation(
+            &conn,
+            "a1",
+            Some(AnchorType::Node),
+            Some("n1"),
+            "same note",
+            None,
+            AnnotationKind::Fact,
+        )
+        .unwrap();
+        let r2 = upsert_annotation(
+            &conn,
+            "a2",
+            Some(AnchorType::Node),
+            Some("n1"),
+            "same note",
+            None,
+            AnnotationKind::Fact,
+        )
+        .unwrap();
         assert!(!r1.deduplicated);
         assert!(r2.deduplicated);
         assert_eq!(r2.id, "a1");
@@ -341,8 +435,26 @@ mod tests {
     #[test]
     fn test_dedup_different_text_not_deduped() {
         let conn = setup_db();
-        let r1 = upsert_annotation(&conn, "a1", Some(AnchorType::Node), Some("n1"), "note A", None, AnnotationKind::Fact).unwrap();
-        let r2 = upsert_annotation(&conn, "a2", Some(AnchorType::Node), Some("n1"), "note B", None, AnnotationKind::Fact).unwrap();
+        let r1 = upsert_annotation(
+            &conn,
+            "a1",
+            Some(AnchorType::Node),
+            Some("n1"),
+            "note A",
+            None,
+            AnnotationKind::Fact,
+        )
+        .unwrap();
+        let r2 = upsert_annotation(
+            &conn,
+            "a2",
+            Some(AnchorType::Node),
+            Some("n1"),
+            "note B",
+            None,
+            AnnotationKind::Fact,
+        )
+        .unwrap();
         assert!(!r1.deduplicated);
         assert!(!r2.deduplicated);
         let annotations = read_by_anchor(&conn, "node", "n1").unwrap();
@@ -352,11 +464,29 @@ mod tests {
     #[test]
     fn test_dedup_bumps_quality() {
         let conn = setup_db();
-        upsert_annotation(&conn, "a1", Some(AnchorType::Node), Some("n1"), "repeated", None, AnnotationKind::Fact).unwrap();
+        upsert_annotation(
+            &conn,
+            "a1",
+            Some(AnchorType::Node),
+            Some("n1"),
+            "repeated",
+            None,
+            AnnotationKind::Fact,
+        )
+        .unwrap();
         let before = read_by_anchor(&conn, "node", "n1").unwrap();
         assert!((before[0].quality - 0.5).abs() < f64::EPSILON);
 
-        upsert_annotation(&conn, "a2", Some(AnchorType::Node), Some("n1"), "repeated", None, AnnotationKind::Fact).unwrap();
+        upsert_annotation(
+            &conn,
+            "a2",
+            Some(AnchorType::Node),
+            Some("n1"),
+            "repeated",
+            None,
+            AnnotationKind::Fact,
+        )
+        .unwrap();
         let after = read_by_anchor(&conn, "node", "n1").unwrap();
         assert!((after[0].quality - 0.6).abs() < f64::EPSILON);
     }
@@ -364,7 +494,16 @@ mod tests {
     #[test]
     fn test_quality_decay() {
         let conn = setup_db();
-        upsert_annotation(&conn, "a1", Some(AnchorType::Node), Some("n1"), "note", None, AnnotationKind::Fact).unwrap();
+        upsert_annotation(
+            &conn,
+            "a1",
+            Some(AnchorType::Node),
+            Some("n1"),
+            "note",
+            None,
+            AnnotationKind::Fact,
+        )
+        .unwrap();
         decay_quality_for_node(&conn, "n1", 0.9).unwrap();
         let annotations = read_by_anchor(&conn, "node", "n1").unwrap();
         assert!((annotations[0].quality - 0.45).abs() < f64::EPSILON);
@@ -373,7 +512,16 @@ mod tests {
     #[test]
     fn test_quality_clamped_at_1() {
         let conn = setup_db();
-        upsert_annotation(&conn, "a1", Some(AnchorType::Node), Some("n1"), "note", None, AnnotationKind::Fact).unwrap();
+        upsert_annotation(
+            &conn,
+            "a1",
+            Some(AnchorType::Node),
+            Some("n1"),
+            "note",
+            None,
+            AnnotationKind::Fact,
+        )
+        .unwrap();
         for _ in 0..20 {
             crate::db::queries::update_annotation_quality(&conn, "a1", 0.1).unwrap();
         }

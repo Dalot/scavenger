@@ -10,9 +10,9 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use parking_lot::RwLock;
+use petgraph::Directed;
 use petgraph::stable_graph::{NodeIndex, StableGraph};
 use petgraph::visit::EdgeRef;
-use petgraph::Directed;
 use rusqlite::Connection;
 
 use crate::db;
@@ -111,9 +111,10 @@ impl GraphState {
         self.reverse_index.clear();
         for edge in self.graph.edge_indices() {
             if let Some((source, target)) = self.graph.edge_endpoints(edge) {
-                if let (Some(src_w), Some(tgt_w)) =
-                    (self.graph.node_weight(source), self.graph.node_weight(target))
-                {
+                if let (Some(src_w), Some(tgt_w)) = (
+                    self.graph.node_weight(source),
+                    self.graph.node_weight(target),
+                ) {
                     self.reverse_index
                         .entry(tgt_w.id.clone())
                         .or_default()
@@ -173,7 +174,11 @@ impl GraphState {
                 weight: row.weight as f32,
                 confidence,
             };
-            self.add_edge(&NodeId(row.from_id.clone()), &NodeId(row.to_id.clone()), weight);
+            self.add_edge(
+                &NodeId(row.from_id.clone()),
+                &NodeId(row.to_id.clone()),
+                weight,
+            );
         }
 
         self.rebuild_reverse_index();
@@ -305,18 +310,29 @@ mod tests {
         g.add_edge(
             &NodeId("a".into()),
             &NodeId("b".into()),
-            EdgeWeight { kind: EdgeKind::Calls, weight: 1.0, confidence: Confidence::Precise },
+            EdgeWeight {
+                kind: EdgeKind::Calls,
+                weight: 1.0,
+                confidence: Confidence::Precise,
+            },
         );
         g.add_edge(
             &NodeId("c".into()),
             &NodeId("b".into()),
-            EdgeWeight { kind: EdgeKind::Calls, weight: 1.0, confidence: Confidence::Precise },
+            EdgeWeight {
+                kind: EdgeKind::Calls,
+                weight: 1.0,
+                confidence: Confidence::Precise,
+            },
         );
         g.compute_pagerank(0.85, 30);
 
         let b_centrality = g.get_weight(&NodeId("b".into())).unwrap().centrality;
         let a_centrality = g.get_weight(&NodeId("a".into())).unwrap().centrality;
-        assert!(b_centrality > a_centrality, "b should have higher centrality");
+        assert!(
+            b_centrality > a_centrality,
+            "b should have higher centrality"
+        );
     }
 
     #[test]

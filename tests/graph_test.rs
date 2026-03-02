@@ -1,8 +1,8 @@
 // T061: Unit tests for graph module — node/edge CRUD, PageRank, reverse index.
 
-use std::path::PathBuf;
-use scavenger::graph::types::*;
 use scavenger::graph::GraphState;
+use scavenger::graph::types::*;
+use std::path::PathBuf;
 
 fn node(id: &str, name: &str, file: &str) -> NodeWeight {
     NodeWeight {
@@ -22,7 +22,11 @@ fn node(id: &str, name: &str, file: &str) -> NodeWeight {
 }
 
 fn edge() -> EdgeWeight {
-    EdgeWeight { kind: EdgeKind::Calls, weight: 1.0, confidence: Confidence::Precise }
+    EdgeWeight {
+        kind: EdgeKind::Calls,
+        weight: 1.0,
+        confidence: Confidence::Precise,
+    }
 }
 
 #[test]
@@ -118,11 +122,20 @@ fn test_load_save_roundtrip() {
     for idx in g.graph.node_indices() {
         if let Some(w) = g.graph.node_weight(idx) {
             scavenger::db::queries::upsert_node(
-                &conn, &w.id.0, w.kind, &w.name,
-                &w.file_path.to_string_lossy(), w.line_start, w.line_end,
-                &w.signature, &w.signature_hash, w.docstring.as_deref(),
-                &w.skeleton, &w.checksum,
-            ).unwrap();
+                &conn,
+                &w.id.0,
+                w.kind,
+                &w.name,
+                &w.file_path.to_string_lossy(),
+                w.line_start,
+                w.line_end,
+                &w.signature,
+                &w.signature_hash,
+                w.docstring.as_deref(),
+                &w.skeleton,
+                &w.checksum,
+            )
+            .unwrap();
         }
     }
 

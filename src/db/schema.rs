@@ -474,7 +474,9 @@ mod tests {
         ensure_branch_schema(&conn).unwrap();
 
         let tables: Vec<String> = conn
-            .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name = 'annotation_edges'")
+            .prepare(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name = 'annotation_edges'",
+            )
             .unwrap()
             .query_map([], |row| row.get(0))
             .unwrap()
@@ -495,16 +497,19 @@ mod tests {
             "INSERT INTO annotations (id, anchor_type, anchor_value, text, created_at, updated_at)
              VALUES ('old1', 'node', 'n1', 'pre-v2 note', 1000, 1000)",
             [],
-        ).unwrap();
+        )
+        .unwrap();
 
         // Now run the full migration
         ensure_branch_schema(&conn).unwrap();
 
-        let (kind, quality): (String, f64) = conn.query_row(
-            "SELECT kind, quality FROM annotations WHERE id = 'old1'",
-            [],
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        ).unwrap();
+        let (kind, quality): (String, f64) = conn
+            .query_row(
+                "SELECT kind, quality FROM annotations WHERE id = 'old1'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
         assert_eq!(kind, "fact");
         assert!((quality - 0.5).abs() < f64::EPSILON);
     }

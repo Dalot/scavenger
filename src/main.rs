@@ -14,7 +14,11 @@ use owo_colors::OwoColorize;
 use std::path::PathBuf;
 
 #[derive(Parser)]
-#[command(name = "scavenger", version, about = "AST dependency graph and session memory engine for AI coding agents (Claude Code, Cursor)")]
+#[command(
+    name = "scavenger",
+    version,
+    about = "AST dependency graph and session memory engine for AI coding agents (Claude Code, Cursor)"
+)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -280,13 +284,26 @@ fn main() {
         Commands::Init => cmd_init(),
         Commands::Daemon => cmd_daemon(),
         Commands::Index { path } => cmd_index(path),
-        Commands::Capsule { file, symbol, query, budget } => cmd_capsule(file, symbol, query, budget),
+        Commands::Capsule {
+            file,
+            symbol,
+            query,
+            budget,
+        } => cmd_capsule(file, symbol, query, budget),
         Commands::Memory { query, limit } => cmd_memory(query, limit),
         Commands::Graph { command } => cmd_graph(command),
         Commands::Annotate { symbol, text, tags } => cmd_annotate(symbol, text, tags),
         Commands::MergeAnnotations { branch } => cmd_merge_annotations(branch),
-        Commands::Doctor { verbose, format, watch } => cmd_doctor(verbose, format, watch),
-        Commands::Stats { session, branch, json } => cmd_stats(session, branch, json),
+        Commands::Doctor {
+            verbose,
+            format,
+            watch,
+        } => cmd_doctor(verbose, format, watch),
+        Commands::Stats {
+            session,
+            branch,
+            json,
+        } => cmd_stats(session, branch, json),
         Commands::Federate { command } => cmd_federate(command),
         Commands::Hook { command } => cmd_hook(command),
         Commands::Metrics { command } => cmd_metrics(command),
@@ -294,7 +311,12 @@ fn main() {
         Commands::Db { command } => cmd_db(command),
         Commands::McpBridge => cmd_mcp_bridge(),
         Commands::Observe { interval } => cmd_observe(interval),
-        Commands::Logs { follow, level, method, lines } => cmd_logs(follow, level, method, lines),
+        Commands::Logs {
+            follow,
+            level,
+            method,
+            lines,
+        } => cmd_logs(follow, level, method, lines),
     };
 
     if let Err(e) = result {
@@ -347,11 +369,8 @@ fn cmd_init() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     // Step 4: Index doc files
-    let doc_files = graph::doc_indexer::collect_doc_files(
-        &project_root,
-        &cfg.docs.patterns,
-        &cfg.docs.exclude,
-    );
+    let doc_files =
+        graph::doc_indexer::collect_doc_files(&project_root, &cfg.docs.patterns, &cfg.docs.exclude);
     if !doc_files.is_empty() {
         eprintln!(
             "  Indexing {} doc files...",
@@ -440,7 +459,10 @@ fn cmd_index(path: Option<PathBuf>) -> Result<(), Box<dyn std::error::Error>> {
     let conn = db::open_branch_db(&scavenger_dir, &branch)?;
 
     let source_files = graph::index::collect_source_files(&project_root);
-    eprintln!("Re-indexing {} files on branch {branch}...", source_files.len());
+    eprintln!(
+        "Re-indexing {} files on branch {branch}...",
+        source_files.len()
+    );
 
     let mut g = graph::GraphState::new();
     g.load_from_db(&conn)?;
@@ -470,11 +492,21 @@ fn cmd_capsule(
     g.compute_pagerank(0.85, 30);
 
     let file_str = file.to_string_lossy().to_string();
-    let qr = query::run_query(&conn, &g, &cfg, &file_str, symbol.as_deref(), query_str.as_deref());
+    let qr = query::run_query(
+        &conn,
+        &g,
+        &cfg,
+        &file_str,
+        symbol.as_deref(),
+        query_str.as_deref(),
+    );
     let result = capsule::assemble(&conn, &g, &cfg, &qr, budget);
 
     println!("{}", result.text);
-    eprintln!("({} tokens, {} items)", result.token_count, result.items_included);
+    eprintln!(
+        "({} tokens, {} items)",
+        result.token_count, result.items_included
+    );
     Ok(())
 }
 
@@ -511,21 +543,34 @@ fn cmd_graph(command: GraphCommands) -> Result<(), Box<dyn std::error::Error>> {
             println!("Nodes: {}", g.node_count());
             println!("Edges: {}", g.edge_count());
             println!("\nTop 10 by centrality:");
-            let mut nodes: Vec<_> = g.graph.node_indices()
+            let mut nodes: Vec<_> = g
+                .graph
+                .node_indices()
                 .filter_map(|idx| g.graph.node_weight(idx))
                 .collect();
-            nodes.sort_by(|a, b| b.centrality.partial_cmp(&a.centrality).unwrap_or(std::cmp::Ordering::Equal));
+            nodes.sort_by(|a, b| {
+                b.centrality
+                    .partial_cmp(&a.centrality)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
             for (i, w) in nodes.iter().take(10).enumerate() {
                 println!("  {}. {} ({}) — {:.4}", i + 1, w.name, w.kind, w.centrality);
             }
         }
         GraphCommands::Show { symbol } => {
-            let found = g.graph.node_indices()
+            let found = g
+                .graph
+                .node_indices()
                 .find(|&idx| g.graph.node_weight(idx).is_some_and(|w| w.name == symbol));
             if let Some(idx) = found {
                 let w = g.graph.node_weight(idx).unwrap();
                 println!("{} ({})", w.name.bold(), w.kind);
-                println!("  File: {}:{}-{}", w.file_path.display(), w.line_start, w.line_end);
+                println!(
+                    "  File: {}:{}-{}",
+                    w.file_path.display(),
+                    w.line_start,
+                    w.line_end
+                );
                 println!("  Signature: {}", w.signature);
                 println!("  Centrality: {:.4}", w.centrality);
 
@@ -600,7 +645,11 @@ fn cmd_merge_annotations(branch: String) -> Result<(), Box<dyn std::error::Error
     Ok(())
 }
 
-fn cmd_doctor(verbose: bool, format: OutputFormat, watch: Option<u64>) -> Result<(), Box<dyn std::error::Error>> {
+fn cmd_doctor(
+    verbose: bool,
+    format: OutputFormat,
+    watch: Option<u64>,
+) -> Result<(), Box<dyn std::error::Error>> {
     if let Some(interval) = watch {
         loop {
             // Clear screen
@@ -632,12 +681,17 @@ fn run_doctor_once(verbose: bool, format: &OutputFormat) -> Result<(), Box<dyn s
     };
     checks.push(DiagCheck::new("Daemon process", "Process", pid_alive));
     if !pid_alive {
-        recommendations.push("Start the daemon: scavenger daemon (or trigger via session hook)".into());
+        recommendations
+            .push("Start the daemon: scavenger daemon (or trigger via session hook)".into());
     }
     checks.push(DiagCheck::new("PID file", "Process", pid_path.exists()));
 
     let sock = scavenger_dir.join("daemon.sock");
-    checks.push(DiagCheck::new("Socket accessible", "Process", sock.exists()));
+    checks.push(DiagCheck::new(
+        "Socket accessible",
+        "Process",
+        sock.exists(),
+    ));
     if pid_alive && !sock.exists() {
         recommendations.push("Socket missing despite running daemon — restart: scavenger hook session-end && scavenger daemon".into());
     }
@@ -671,12 +725,22 @@ fn run_doctor_once(verbose: bool, format: &OutputFormat) -> Result<(), Box<dyn s
     }
 
     // .scavenger dir exists
-    checks.push(DiagCheck::new("Initialized", "FileIntegrity", scavenger_dir.exists()));
+    checks.push(DiagCheck::new(
+        "Initialized",
+        "FileIntegrity",
+        scavenger_dir.exists(),
+    ));
 
     // Branch DB exists
     let sanitized = branch.replace(['/', '\\', ':', '*', '?', '"', '<', '>', '|'], "_");
-    let branch_db = scavenger_dir.join("indexes").join(format!("{sanitized}.db"));
-    checks.push(DiagCheck::new("Branch DB exists", "FileIntegrity", branch_db.exists()));
+    let branch_db = scavenger_dir
+        .join("indexes")
+        .join(format!("{sanitized}.db"));
+    checks.push(DiagCheck::new(
+        "Branch DB exists",
+        "FileIntegrity",
+        branch_db.exists(),
+    ));
 
     // Log analysis (parse recent daemon logs for error patterns)
     let mut log_errors = 0u32;
@@ -715,13 +779,24 @@ fn run_doctor_once(verbose: bool, format: &OutputFormat) -> Result<(), Box<dyn s
     }
 
     let log_health = log_errors == 0;
-    checks.push(DiagCheck::new("No recent errors in logs", "Logs", log_health));
+    checks.push(DiagCheck::new(
+        "No recent errors in logs",
+        "Logs",
+        log_health,
+    ));
     if log_errors > 0 {
-        recommendations.push(format!("{log_errors} errors in recent logs — run: scavenger logs --level error"));
+        recommendations.push(format!(
+            "{log_errors} errors in recent logs — run: scavenger logs --level error"
+        ));
     }
 
-    let empty_rate_ok = total_capsules == 0 || (empty_capsules as f64 / total_capsules as f64) < 0.5;
-    checks.push(DiagCheck::new("Empty capsule rate < 50%", "Effectiveness", empty_rate_ok));
+    let empty_rate_ok =
+        total_capsules == 0 || (empty_capsules as f64 / total_capsules as f64) < 0.5;
+    checks.push(DiagCheck::new(
+        "Empty capsule rate < 50%",
+        "Effectiveness",
+        empty_rate_ok,
+    ));
     if !empty_rate_ok {
         recommendations.push(format!(
             "High empty capsule rate ({empty_capsules}/{total_capsules}) — ensure files are indexed: scavenger index"
@@ -732,11 +807,20 @@ fn run_doctor_once(verbose: bool, format: &OutputFormat) -> Result<(), Box<dyn s
     let daemon_metrics = fetch_daemon_metrics(&scavenger_dir);
     let mut latency_ok = true;
     if let Some(ref dm) = daemon_metrics {
-        let p99 = dm.pointer("/capsule/latency_us/p99").and_then(|v| v.as_u64()).unwrap_or(0);
+        let p99 = dm
+            .pointer("/capsule/latency_us/p99")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
         latency_ok = p99 < 5_000_000; // 5 seconds
-        checks.push(DiagCheck::new("Capsule P99 < 5s", "Performance", latency_ok));
+        checks.push(DiagCheck::new(
+            "Capsule P99 < 5s",
+            "Performance",
+            latency_ok,
+        ));
         if !latency_ok {
-            recommendations.push(format!("Capsule P99 latency is {p99}us — check graph size and DB performance"));
+            recommendations.push(format!(
+                "Capsule P99 latency is {p99}us — check graph size and DB performance"
+            ));
         }
     }
 
@@ -835,7 +919,11 @@ struct DiagCheck {
 
 impl DiagCheck {
     fn new(name: &'static str, category: &'static str, passed: bool) -> Self {
-        Self { name, category, passed }
+        Self {
+            name,
+            category,
+            passed,
+        }
     }
 }
 
@@ -930,7 +1018,10 @@ fn cmd_stats(
             let p50 = lat.get("p50").and_then(|v| v.as_u64()).unwrap_or(0);
             let p95 = lat.get("p95").and_then(|v| v.as_u64()).unwrap_or(0);
             let p99 = lat.get("p99").and_then(|v| v.as_u64()).unwrap_or(0);
-            println!("  Capsule latency:    P50={}us  P95={}us  P99={}us", p50, p95, p99);
+            println!(
+                "  Capsule latency:    P50={}us  P95={}us  P99={}us",
+                p50, p95, p99
+            );
 
             let empty = cap.get("empty").and_then(|v| v.as_u64()).unwrap_or(0);
             let total = cap.get("total").and_then(|v| v.as_u64()).unwrap_or(0);
@@ -939,14 +1030,18 @@ fn cmd_stats(
                 println!("  Empty capsules:     {empty} / {total} ({empty_pct:.1}%)");
             }
 
-            let budget = cap.get("budget_utilization_pct").unwrap_or(&serde_json::Value::Null);
+            let budget = cap
+                .get("budget_utilization_pct")
+                .unwrap_or(&serde_json::Value::Null);
             let avg_util = budget.get("avg").and_then(|v| v.as_u64()).unwrap_or(0);
             println!("  Budget utilization: {avg_util}% avg");
         }
 
         if let Some(reindex) = dm.get("reindex") {
             let count = reindex.get("count").and_then(|v| v.as_u64()).unwrap_or(0);
-            let lat = reindex.get("latency_us").unwrap_or(&serde_json::Value::Null);
+            let lat = reindex
+                .get("latency_us")
+                .unwrap_or(&serde_json::Value::Null);
             let p50 = lat.get("p50").and_then(|v| v.as_u64()).unwrap_or(0);
             if count > 0 {
                 println!("  Reindex:            {count} events (P50={p50}us)");
@@ -983,7 +1078,8 @@ fn fetch_daemon_metrics(scavenger_dir: &std::path::Path) -> Option<serde_json::V
     }
     let rt = tokio::runtime::Runtime::new().ok()?;
     let request = serde_json::json!({ "method": "metrics" });
-    rt.block_on(daemon::socket::send_request(&socket_path, &request)).ok()
+    rt.block_on(daemon::socket::send_request(&socket_path, &request))
+        .ok()
 }
 
 fn cmd_federate(command: FederateCommands) -> Result<(), Box<dyn std::error::Error>> {
@@ -1028,7 +1124,8 @@ fn cmd_federate(command: FederateCommands) -> Result<(), Box<dyn std::error::Err
             println!("Removed federated repo: {}", abs_path.display());
         }
         FederateCommands::List => {
-            let mut stmt = meta_conn.prepare("SELECT path, added_at, last_seen FROM federated_repos")?;
+            let mut stmt =
+                meta_conn.prepare("SELECT path, added_at, last_seen FROM federated_repos")?;
             let rows = stmt.query_map([], |row| {
                 Ok((
                     row.get::<_, String>(0)?,
@@ -1043,7 +1140,9 @@ fn cmd_federate(command: FederateCommands) -> Result<(), Box<dyn std::error::Err
                     "  {} (added: {}, last_seen: {})",
                     path,
                     added,
-                    last_seen.map(|t| t.to_string()).unwrap_or_else(|| "never".to_string())
+                    last_seen
+                        .map(|t| t.to_string())
+                        .unwrap_or_else(|| "never".to_string())
                 );
             }
         }
@@ -1127,9 +1226,7 @@ fn read_pid(pid_path: &std::path::Path) -> Option<i32> {
 }
 
 fn is_daemon_running(pid_path: &std::path::Path) -> bool {
-    read_pid(pid_path).is_some_and(|pid| {
-        std::path::Path::new(&format!("/proc/{pid}")).exists()
-    })
+    read_pid(pid_path).is_some_and(|pid| std::path::Path::new(&format!("/proc/{pid}")).exists())
 }
 
 /// Send SIGTERM, wait up to 5s for exit, then SIGKILL if still alive.
@@ -1137,7 +1234,9 @@ fn is_daemon_running(pid_path: &std::path::Path) -> bool {
 fn kill_daemon_and_wait(pid: i32, scavenger_dir: &std::path::Path) {
     #[cfg(unix)]
     {
-        unsafe { libc::kill(pid, libc::SIGTERM); }
+        unsafe {
+            libc::kill(pid, libc::SIGTERM);
+        }
 
         let proc_path = format!("/proc/{pid}");
         for _ in 0..50 {
@@ -1149,7 +1248,9 @@ fn kill_daemon_and_wait(pid: i32, scavenger_dir: &std::path::Path) {
         }
 
         eprintln!("Daemon PID {pid} did not exit after SIGTERM, sending SIGKILL...");
-        unsafe { libc::kill(pid, libc::SIGKILL); }
+        unsafe {
+            libc::kill(pid, libc::SIGKILL);
+        }
 
         for _ in 0..20 {
             if !std::path::Path::new(&proc_path).exists() {
@@ -1181,8 +1282,12 @@ fn cmd_metrics(command: MetricsCommands) -> Result<(), Box<dyn std::error::Error
             let sessions = hooks::metrics::list_sessions(&scavenger_dir);
             if sessions.is_empty() {
                 eprintln!("No metrics sessions found.");
-                eprintln!("Metrics are collected automatically via audit hooks (Claude Code plugin or Cursor hooks).");
-                eprintln!("Start a session and the audit hooks will log tool calls to .scavenger/metrics/");
+                eprintln!(
+                    "Metrics are collected automatically via audit hooks (Claude Code plugin or Cursor hooks)."
+                );
+                eprintln!(
+                    "Start a session and the audit hooks will log tool calls to .scavenger/metrics/"
+                );
                 return Ok(());
             }
             print!("{}", hooks::metrics::format_list(&scavenger_dir, &sessions));
@@ -1194,7 +1299,10 @@ fn cmd_metrics(command: MetricsCommands) -> Result<(), Box<dyn std::error::Error
                 None => return Err(format!("No metrics found for session {id}").into()),
             }
         }
-        MetricsCommands::Compare { session_a, session_b } => {
+        MetricsCommands::Compare {
+            session_a,
+            session_b,
+        } => {
             let id_a = resolve_session_id(&scavenger_dir, &session_a)?;
             let id_b = resolve_session_id(&scavenger_dir, &session_b)?;
             let a = hooks::metrics::analyze_session(&scavenger_dir, &id_a)
@@ -1213,14 +1321,20 @@ fn cmd_metrics(command: MetricsCommands) -> Result<(), Box<dyn std::error::Error
 }
 
 /// Resolve a session ID prefix to the full ID. Prefers exact matches.
-fn resolve_session_id(scavenger_dir: &std::path::Path, prefix: &str) -> Result<String, Box<dyn std::error::Error>> {
+fn resolve_session_id(
+    scavenger_dir: &std::path::Path,
+    prefix: &str,
+) -> Result<String, Box<dyn std::error::Error>> {
     let sessions = hooks::metrics::list_sessions(scavenger_dir);
 
     if let Some(exact) = sessions.iter().find(|id| *id == prefix) {
         return Ok(exact.clone());
     }
 
-    let matches: Vec<_> = sessions.iter().filter(|id| id.starts_with(prefix)).collect();
+    let matches: Vec<_> = sessions
+        .iter()
+        .filter(|id| id.starts_with(prefix))
+        .collect();
     match matches.len() {
         0 => Err(format!("No session found matching prefix '{prefix}'").into()),
         1 => Ok(matches[0].clone()),
@@ -1297,20 +1411,32 @@ fn cmd_db(command: DbCommands) -> Result<(), Box<dyn std::error::Error>> {
             let node_count: i64 = conn.query_row("SELECT COUNT(*) FROM nodes", [], |r| r.get(0))?;
             let edge_count: i64 = conn.query_row("SELECT COUNT(*) FROM edges", [], |r| r.get(0))?;
             let file_count: i64 = conn.query_row("SELECT COUNT(*) FROM files", [], |r| r.get(0))?;
-            let annotation_count: i64 = conn.query_row("SELECT COUNT(*) FROM annotations", [], |r| r.get(0))?;
-            let signal_count: i64 = conn.query_row("SELECT COUNT(*) FROM behavioral_signals", [], |r| r.get(0))?;
-            let doc_chunk_count: i64 = conn.query_row("SELECT COUNT(*) FROM doc_chunks", [], |r| r.get(0))?;
-            let session_event_count: i64 = conn.query_row("SELECT COUNT(*) FROM session_log", [], |r| r.get(0))?;
-            let token_log_count: i64 = meta_conn.query_row("SELECT COUNT(*) FROM token_log", [], |r| r.get(0)).unwrap_or(0);
-            let last_indexed: Option<i64> = conn.query_row(
-                "SELECT MAX(last_indexed) FROM files", [], |r| r.get(0),
-            ).unwrap_or(None);
+            let annotation_count: i64 =
+                conn.query_row("SELECT COUNT(*) FROM annotations", [], |r| r.get(0))?;
+            let signal_count: i64 =
+                conn.query_row("SELECT COUNT(*) FROM behavioral_signals", [], |r| r.get(0))?;
+            let doc_chunk_count: i64 =
+                conn.query_row("SELECT COUNT(*) FROM doc_chunks", [], |r| r.get(0))?;
+            let session_event_count: i64 =
+                conn.query_row("SELECT COUNT(*) FROM session_log", [], |r| r.get(0))?;
+            let token_log_count: i64 = meta_conn
+                .query_row("SELECT COUNT(*) FROM token_log", [], |r| r.get(0))
+                .unwrap_or(0);
+            let last_indexed: Option<i64> = conn
+                .query_row("SELECT MAX(last_indexed) FROM files", [], |r| r.get(0))
+                .unwrap_or(None);
 
             let sanitized = branch.replace(['/', '\\', ':', '*', '?', '"', '<', '>', '|'], "_");
-            let branch_db_path = scavenger_dir.join("indexes").join(format!("{sanitized}.db"));
+            let branch_db_path = scavenger_dir
+                .join("indexes")
+                .join(format!("{sanitized}.db"));
             let meta_db_path = scavenger_dir.join("daemon_meta.db");
-            let branch_db_size = std::fs::metadata(&branch_db_path).map(|m| m.len()).unwrap_or(0);
-            let meta_db_size = std::fs::metadata(&meta_db_path).map(|m| m.len()).unwrap_or(0);
+            let branch_db_size = std::fs::metadata(&branch_db_path)
+                .map(|m| m.len())
+                .unwrap_or(0);
+            let meta_db_size = std::fs::metadata(&meta_db_path)
+                .map(|m| m.len())
+                .unwrap_or(0);
 
             println!("Scavenger DB Summary (branch: {})", branch.cyan());
             println!("{}", "─".repeat(45));
@@ -1326,23 +1452,33 @@ fn cmd_db(command: DbCommands) -> Result<(), Box<dyn std::error::Error>> {
                 println!("  Last indexed:        {ts} (unix)");
             }
             println!();
-            println!("  Branch DB:           {} ({:.1} MB)", branch_db_path.display(), branch_db_size as f64 / 1_048_576.0);
-            println!("  Meta DB:             {} ({:.1} MB)", meta_db_path.display(), meta_db_size as f64 / 1_048_576.0);
+            println!(
+                "  Branch DB:           {} ({:.1} MB)",
+                branch_db_path.display(),
+                branch_db_size as f64 / 1_048_576.0
+            );
+            println!(
+                "  Meta DB:             {} ({:.1} MB)",
+                meta_db_path.display(),
+                meta_db_size as f64 / 1_048_576.0
+            );
         }
         DbCommands::Nodes { limit } => {
             let conn = db::open_branch_db(&scavenger_dir, &branch)?;
             let mut stmt = conn.prepare(
                 "SELECT name, kind, file_path, line_start, centrality FROM nodes ORDER BY centrality DESC LIMIT ?1"
             )?;
-            let rows = stmt.query_map([limit], |row| {
-                Ok(vec![
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                    row.get::<_, i64>(3)?.to_string(),
-                    format!("{:.4}", row.get::<_, f64>(4)?),
-                ])
-            })?.collect::<Result<Vec<_>, _>>()?;
+            let rows = stmt
+                .query_map([limit], |row| {
+                    Ok(vec![
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, i64>(3)?.to_string(),
+                        format!("{:.4}", row.get::<_, f64>(4)?),
+                    ])
+                })?
+                .collect::<Result<Vec<_>, _>>()?;
             print_table(
                 &["Name", "Kind", "File", "Line", "Central"],
                 &[60, 12, 80, 6, 8],
@@ -1354,14 +1490,16 @@ fn cmd_db(command: DbCommands) -> Result<(), Box<dyn std::error::Error>> {
             let mut stmt = conn.prepare(
                 "SELECT file_path, file_type, raw_token_estimate, last_indexed FROM files ORDER BY last_indexed DESC LIMIT ?1"
             )?;
-            let rows = stmt.query_map([limit], |row| {
-                Ok(vec![
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, i64>(2)?.to_string(),
-                    row.get::<_, i64>(3)?.to_string(),
-                ])
-            })?.collect::<Result<Vec<_>, _>>()?;
+            let rows = stmt
+                .query_map([limit], |row| {
+                    Ok(vec![
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, i64>(2)?.to_string(),
+                        row.get::<_, i64>(3)?.to_string(),
+                    ])
+                })?
+                .collect::<Result<Vec<_>, _>>()?;
             print_table(
                 &["File", "Type", "Tokens", "LastIndexed"],
                 &[80, 8, 8, 12],
@@ -1373,16 +1511,25 @@ fn cmd_db(command: DbCommands) -> Result<(), Box<dyn std::error::Error>> {
             let mut stmt = conn.prepare(
                 "SELECT id, kind, anchor_type, anchor_value, stale, substr(text, 1, 120) FROM annotations ORDER BY updated_at DESC LIMIT ?1"
             )?;
-            let rows = stmt.query_map([limit], |row| {
-                Ok(vec![
-                    row.get::<_, String>(0)?,
-                    row.get::<_, Option<String>>(1)?.unwrap_or_else(|| "fact".into()),
-                    row.get::<_, Option<String>>(2)?.unwrap_or_else(|| "-".into()),
-                    row.get::<_, Option<String>>(3)?.unwrap_or_else(|| "-".into()),
-                    if row.get::<_, bool>(4)? { "yes".into() } else { "no".into() },
-                    row.get::<_, String>(5)?.replace('\n', " "),
-                ])
-            })?.collect::<Result<Vec<_>, _>>()?;
+            let rows = stmt
+                .query_map([limit], |row| {
+                    Ok(vec![
+                        row.get::<_, String>(0)?,
+                        row.get::<_, Option<String>>(1)?
+                            .unwrap_or_else(|| "fact".into()),
+                        row.get::<_, Option<String>>(2)?
+                            .unwrap_or_else(|| "-".into()),
+                        row.get::<_, Option<String>>(3)?
+                            .unwrap_or_else(|| "-".into()),
+                        if row.get::<_, bool>(4)? {
+                            "yes".into()
+                        } else {
+                            "no".into()
+                        },
+                        row.get::<_, String>(5)?.replace('\n', " "),
+                    ])
+                })?
+                .collect::<Result<Vec<_>, _>>()?;
             print_table(
                 &["ID", "Kind", "AnchorType", "AnchorValue", "Stale", "Text"],
                 &[36, 10, 12, 40, 5, 80],
@@ -1394,34 +1541,49 @@ fn cmd_db(command: DbCommands) -> Result<(), Box<dyn std::error::Error>> {
             let mut stmt = meta_conn.prepare(
                 "SELECT timestamp, session_id, branch, tool_name, tokens_actual, tokens_estimated, files_touched FROM token_log ORDER BY timestamp DESC LIMIT ?1"
             )?;
-            let rows = stmt.query_map([limit], |row| {
-                let actual: i64 = row.get(4)?;
-                let estimated: i64 = row.get(5)?;
-                let saved = if estimated > 0 {
-                    format!("{:.0}%", (1.0 - actual as f64 / estimated as f64) * 100.0)
-                } else {
-                    "-".into()
-                };
-                Ok(vec![
-                    row.get::<_, i64>(0)?.to_string(),
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                    row.get::<_, String>(3)?,
-                    actual.to_string(),
-                    estimated.to_string(),
-                    saved,
-                    row.get::<_, Option<String>>(6)?.unwrap_or_else(|| "-".into()),
-                ])
-            })?.collect::<Result<Vec<_>, _>>()?;
+            let rows = stmt
+                .query_map([limit], |row| {
+                    let actual: i64 = row.get(4)?;
+                    let estimated: i64 = row.get(5)?;
+                    let saved = if estimated > 0 {
+                        format!("{:.0}%", (1.0 - actual as f64 / estimated as f64) * 100.0)
+                    } else {
+                        "-".into()
+                    };
+                    Ok(vec![
+                        row.get::<_, i64>(0)?.to_string(),
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, String>(3)?,
+                        actual.to_string(),
+                        estimated.to_string(),
+                        saved,
+                        row.get::<_, Option<String>>(6)?
+                            .unwrap_or_else(|| "-".into()),
+                    ])
+                })?
+                .collect::<Result<Vec<_>, _>>()?;
             print_table(
-                &["Timestamp", "Session", "Branch", "Tool", "Actual", "Estimated", "Saved", "File"],
+                &[
+                    "Timestamp",
+                    "Session",
+                    "Branch",
+                    "Tool",
+                    "Actual",
+                    "Estimated",
+                    "Saved",
+                    "File",
+                ],
                 &[12, 36, 45, 14, 8, 10, 6, 80],
                 &rows,
             );
         }
         DbCommands::Query { sql, meta } => {
             let sql_lower = sql.trim().to_lowercase();
-            if !sql_lower.starts_with("select") && !sql_lower.starts_with("pragma") && !sql_lower.starts_with("explain") {
+            if !sql_lower.starts_with("select")
+                && !sql_lower.starts_with("pragma")
+                && !sql_lower.starts_with("explain")
+            {
                 return Err("Only SELECT, PRAGMA, and EXPLAIN statements are allowed.".into());
             }
 
@@ -1433,23 +1595,30 @@ fn cmd_db(command: DbCommands) -> Result<(), Box<dyn std::error::Error>> {
 
             let mut stmt = conn.prepare(&sql)?;
             let col_count = stmt.column_count();
-            let col_names: Vec<String> = (0..col_count).map(|i| stmt.column_name(i).unwrap_or("?").to_string()).collect();
+            let col_names: Vec<String> = (0..col_count)
+                .map(|i| stmt.column_name(i).unwrap_or("?").to_string())
+                .collect();
             println!("{}", col_names.join(" | "));
-            println!("{}", "─".repeat(col_names.iter().map(|c| c.len() + 3).sum::<usize>()));
+            println!(
+                "{}",
+                "─".repeat(col_names.iter().map(|c| c.len() + 3).sum::<usize>())
+            );
 
             let mut rows = stmt.query([])?;
             while let Some(row) = rows.next()? {
-                let vals: Vec<String> = (0..col_count).map(|i| {
-                    row.get::<_, rusqlite::types::Value>(i)
-                        .map(|v| match v {
-                            rusqlite::types::Value::Null => "NULL".to_string(),
-                            rusqlite::types::Value::Integer(n) => n.to_string(),
-                            rusqlite::types::Value::Real(f) => format!("{f:.4}"),
-                            rusqlite::types::Value::Text(s) => s,
-                            rusqlite::types::Value::Blob(b) => format!("[{} bytes]", b.len()),
-                        })
-                        .unwrap_or_else(|_| "?".to_string())
-                }).collect();
+                let vals: Vec<String> = (0..col_count)
+                    .map(|i| {
+                        row.get::<_, rusqlite::types::Value>(i)
+                            .map(|v| match v {
+                                rusqlite::types::Value::Null => "NULL".to_string(),
+                                rusqlite::types::Value::Integer(n) => n.to_string(),
+                                rusqlite::types::Value::Real(f) => format!("{f:.4}"),
+                                rusqlite::types::Value::Text(s) => s,
+                                rusqlite::types::Value::Blob(b) => format!("[{} bytes]", b.len()),
+                            })
+                            .unwrap_or_else(|_| "?".to_string())
+                    })
+                    .collect();
                 println!("{}", vals.join(" | "));
             }
         }
@@ -1490,11 +1659,7 @@ fn cmd_logs(
     let log_dir = &scavenger_dir;
     let mut log_files: Vec<_> = std::fs::read_dir(log_dir)?
         .filter_map(|e| e.ok())
-        .filter(|e| {
-            e.file_name()
-                .to_string_lossy()
-                .starts_with("daemon.log")
-        })
+        .filter(|e| e.file_name().to_string_lossy().starts_with("daemon.log"))
         .collect();
 
     if log_files.is_empty() {
@@ -1516,35 +1681,46 @@ fn cmd_logs(
     let format_line = |line: &str| -> Option<String> {
         let parsed: serde_json::Value = serde_json::from_str(line).ok()?;
 
-        let log_level = parsed.get("level")
+        let log_level = parsed
+            .get("level")
             .and_then(|v| v.as_str())
             .unwrap_or("INFO");
         let line_level_num = match log_level.to_uppercase().as_str() {
-            "TRACE" => 0, "DEBUG" => 1, "INFO" => 2, "WARN" => 3, "ERROR" => 4, _ => 2,
+            "TRACE" => 0,
+            "DEBUG" => 1,
+            "INFO" => 2,
+            "WARN" => 3,
+            "ERROR" => 4,
+            _ => 2,
         };
         if line_level_num < level_num {
             return None;
         }
 
         if let Some(ref method) = method_filter {
-            let span_str = parsed.get("span")
+            let span_str = parsed
+                .get("span")
                 .or_else(|| parsed.get("spans"))
                 .map(|v| v.to_string())
                 .unwrap_or_default();
             let target = parsed.get("target").and_then(|v| v.as_str()).unwrap_or("");
-            let message = parsed.get("fields").and_then(|f| f.get("message")).and_then(|v| v.as_str()).unwrap_or("");
+            let message = parsed
+                .get("fields")
+                .and_then(|f| f.get("message"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
             if !span_str.contains(method) && !target.contains(method) && !message.contains(method) {
                 return None;
             }
         }
 
-        let ts = parsed.get("timestamp")
+        let ts = parsed
+            .get("timestamp")
             .and_then(|v| v.as_str())
             .unwrap_or("");
         let ts_short = if ts.len() > 19 { &ts[11..19] } else { ts };
 
-        let fields = parsed.get("fields")
-            .and_then(|v| v.as_object());
+        let fields = parsed.get("fields").and_then(|v| v.as_object());
         let message = fields
             .and_then(|f| f.get("message"))
             .and_then(|v| v.as_str())
@@ -1553,8 +1729,12 @@ fn cmd_logs(
         let mut extra_fields = String::new();
         if let Some(f) = fields {
             for (k, v) in f {
-                if k == "message" { continue; }
-                if !extra_fields.is_empty() { extra_fields.push_str(", "); }
+                if k == "message" {
+                    continue;
+                }
+                if !extra_fields.is_empty() {
+                    extra_fields.push_str(", ");
+                }
                 extra_fields.push_str(&format!("{k}={v}"));
             }
         }
@@ -1570,7 +1750,10 @@ fn cmd_logs(
         if extra_fields.is_empty() {
             Some(format!("{ts_short} {level_colored:<5} {message}"))
         } else {
-            Some(format!("{ts_short} {level_colored:<5} {message}  {}", extra_fields.dimmed()))
+            Some(format!(
+                "{ts_short} {level_colored:<5} {message}  {}",
+                extra_fields.dimmed()
+            ))
         }
     };
 
@@ -1653,7 +1836,9 @@ fn print_table(headers: &[&str], caps: &[usize], rows: &[Vec<String>]) {
     // Header
     let mut header_line = String::new();
     for (i, h) in headers.iter().enumerate() {
-        if i > 0 { header_line.push_str("  "); }
+        if i > 0 {
+            header_line.push_str("  ");
+        }
         header_line.push_str(&format!("{:<width$}", h, width = widths[i]));
     }
     println!("{header_line}");
@@ -1663,7 +1848,9 @@ fn print_table(headers: &[&str], caps: &[usize], rows: &[Vec<String>]) {
     for row in rows {
         let mut line = String::new();
         for i in 0..ncols {
-            if i > 0 { line.push_str("  "); }
+            if i > 0 {
+                line.push_str("  ");
+            }
             let val = row.get(i).map(|s| s.as_str()).unwrap_or("");
             let w = widths[i];
             if val.len() > w && w > 1 {

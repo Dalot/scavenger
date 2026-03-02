@@ -151,6 +151,10 @@ mod tests {
             record_version(&conn, &sym, None, &[]).unwrap();
         }
         let versions = get_recent_versions(&conn, "hash_bar", 10).unwrap();
-        assert!(versions.len() <= 5, "should keep at most 5, got {}", versions.len());
+        assert!(
+            versions.len() <= 5,
+            "should keep at most 5, got {}",
+            versions.len()
+        );
     }
 }

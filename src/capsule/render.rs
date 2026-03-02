@@ -30,11 +30,7 @@ pub fn trim(candidates: &mut Vec<CandidateItem>, budget: u32) {
 
     let remaining_budget = budget - pinned_tokens;
 
-    let mut unpinned: Vec<_> = candidates
-        .iter()
-        .filter(|c| !c.pinned)
-        .cloned()
-        .collect();
+    let mut unpinned: Vec<_> = candidates.iter().filter(|c| !c.pinned).cloned().collect();
 
     unpinned.sort_by(|a, b| {
         b.score
@@ -65,13 +61,11 @@ pub fn group(candidates: &mut [CandidateItem]) {
             CandidateSource::BehavioralSignal => OutputGroup::Signal,
             CandidateSource::Caller => OutputGroup::Callers,
             CandidateSource::Callee => OutputGroup::Callees,
-            CandidateSource::Annotation | CandidateSource::NodeHistory | CandidateSource::SessionActivity => {
-                OutputGroup::Context
-            }
+            CandidateSource::Annotation
+            | CandidateSource::NodeHistory
+            | CandidateSource::SessionActivity => OutputGroup::Context,
             CandidateSource::DocChunk => OutputGroup::Documentation,
-            CandidateSource::GraphNode => {
-                OutputGroup::Context
-            }
+            CandidateSource::GraphNode => OutputGroup::Context,
         });
     }
 }
@@ -201,7 +195,10 @@ mod tests {
         assert!(items[0].pinned, "Target should be pinned");
         assert!(items[1].pinned, "Signal should be pinned");
         assert!(items[2].pinned, "Caller (semi-pinned) should be pinned");
-        assert!(!items[3].pinned, "Non-structural GraphNode should not be pinned");
+        assert!(
+            !items[3].pinned,
+            "Non-structural GraphNode should not be pinned"
+        );
     }
 
     #[test]
@@ -232,7 +229,13 @@ mod tests {
         assert_eq!(items[2].group, Some(OutputGroup::Documentation));
     }
 
-    fn full_item(source: CandidateSource, content: &str, score: f64, pinned: bool, group: OutputGroup) -> CandidateItem {
+    fn full_item(
+        source: CandidateSource,
+        content: &str,
+        score: f64,
+        pinned: bool,
+        group: OutputGroup,
+    ) -> CandidateItem {
         CandidateItem {
             content: content.to_string(),
             token_count: (content.len() / 4).max(1) as u32,
@@ -258,9 +261,27 @@ mod tests {
     #[test]
     fn test_render_section_ordering() {
         let items = vec![
-            full_item(CandidateSource::Target, "fn target()", 1.0, true, OutputGroup::Target),
-            full_item(CandidateSource::BehavioralSignal, "[!] THRASHING: repeated edits", 1.0, true, OutputGroup::Signal),
-            full_item(CandidateSource::Caller, "fn caller()", 0.5, false, OutputGroup::Callers),
+            full_item(
+                CandidateSource::Target,
+                "fn target()",
+                1.0,
+                true,
+                OutputGroup::Target,
+            ),
+            full_item(
+                CandidateSource::BehavioralSignal,
+                "[!] THRASHING: repeated edits",
+                1.0,
+                true,
+                OutputGroup::Signal,
+            ),
+            full_item(
+                CandidateSource::Caller,
+                "fn caller()",
+                0.5,
+                false,
+                OutputGroup::Callers,
+            ),
         ];
         let output = render(&items, 1000, None);
         let signal_pos = output.find("[!]").unwrap();
@@ -272,9 +293,13 @@ mod tests {
 
     #[test]
     fn test_render_omits_empty_sections() {
-        let items = vec![
-            full_item(CandidateSource::Target, "fn target()", 1.0, true, OutputGroup::Target),
-        ];
+        let items = vec![full_item(
+            CandidateSource::Target,
+            "fn target()",
+            1.0,
+            true,
+            OutputGroup::Target,
+        )];
         let output = render(&items, 1000, None);
         assert!(output.contains("[TARGET]"));
         assert!(!output.contains("[CALLERS]"));
@@ -286,9 +311,13 @@ mod tests {
         let file_path = tmp.path().join("test.rs");
         std::fs::write(&file_path, "fn hello() {\n    println!(\"hello\");\n}\n").unwrap();
 
-        let items = vec![
-            full_item(CandidateSource::Target, "fn hello()", 1.0, true, OutputGroup::Target),
-        ];
+        let items = vec![full_item(
+            CandidateSource::Target,
+            "fn hello()",
+            1.0,
+            true,
+            OutputGroup::Target,
+        )];
 
         let tb = TargetBody {
             file_path: file_path.to_string_lossy().to_string(),
@@ -298,15 +327,25 @@ mod tests {
         };
 
         let output = render(&items, 500, Some(&tb));
-        assert!(output.contains("[BODY] hello"), "should include [BODY] section: {output}");
-        assert!(output.contains("println!"), "body should include function content");
+        assert!(
+            output.contains("[BODY] hello"),
+            "should include [BODY] section: {output}"
+        );
+        assert!(
+            output.contains("println!"),
+            "body should include function content"
+        );
     }
 
     #[test]
     fn test_render_body_not_included_below_threshold() {
-        let items = vec![
-            full_item(CandidateSource::Target, "fn hello()", 1.0, true, OutputGroup::Target),
-        ];
+        let items = vec![full_item(
+            CandidateSource::Target,
+            "fn hello()",
+            1.0,
+            true,
+            OutputGroup::Target,
+        )];
 
         let tb = TargetBody {
             file_path: "/nonexistent".to_string(),
@@ -316,6 +355,9 @@ mod tests {
         };
 
         let output = render(&items, 100, Some(&tb));
-        assert!(!output.contains("[BODY]"), "should not include [BODY] when budget <= 200");
+        assert!(
+            !output.contains("[BODY]"),
+            "should not include [BODY] when budget <= 200"
+        );
     }
 }

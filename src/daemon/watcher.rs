@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use notify::RecursiveMode;
-use notify_debouncer_full::{new_debouncer, DebouncedEvent};
+use notify_debouncer_full::{DebouncedEvent, new_debouncer};
 use parking_lot::Mutex;
 use tokio::sync::mpsc;
 
@@ -45,16 +45,14 @@ pub fn start_watcher(
     let mut debouncer = new_debouncer(
         Duration::from_millis(300),
         None,
-        move |result: Result<Vec<DebouncedEvent>, Vec<notify::Error>>| {
-            match result {
-                Ok(events) => {
-                    let mut pending = pending_clone.lock();
-                    pending.extend(events);
-                }
-                Err(errors) => {
-                    for e in errors {
-                        eprintln!("Watcher error: {e}");
-                    }
+        move |result: Result<Vec<DebouncedEvent>, Vec<notify::Error>>| match result {
+            Ok(events) => {
+                let mut pending = pending_clone.lock();
+                pending.extend(events);
+            }
+            Err(errors) => {
+                for e in errors {
+                    eprintln!("Watcher error: {e}");
                 }
             }
         },
@@ -89,7 +87,8 @@ pub fn start_watcher(
                         if path.ends_with("index.lock") {
                             saw_git_index_lock = true;
                         }
-                        if path.ends_with("HEAD") || path.file_name().map_or(false, |n| n == "HEAD") {
+                        if path.ends_with("HEAD") || path.file_name().map_or(false, |n| n == "HEAD")
+                        {
                             saw_git_head = true;
                         }
                         continue;
@@ -150,7 +149,9 @@ fn build_gitignore(root: &Path) -> ignore::gitignore::Gitignore {
         let _ = builder.add(&gitignore_path);
     }
     builder.build().unwrap_or_else(|_| {
-        ignore::gitignore::GitignoreBuilder::new(root).build().unwrap()
+        ignore::gitignore::GitignoreBuilder::new(root)
+            .build()
+            .unwrap()
     })
 }
 
@@ -180,9 +181,29 @@ pub enum FileRoute {
 fn is_code_extension(ext: &str) -> bool {
     matches!(
         ext,
-        "rs" | "py" | "pyi" | "ts" | "tsx" | "js" | "mjs" | "cjs" | "jsx"
-            | "go" | "java" | "cs" | "c" | "h" | "cpp" | "cc" | "cxx"
-            | "hpp" | "hxx" | "rb" | "sh" | "bash" | "php" | "swift"
+        "rs" | "py"
+            | "pyi"
+            | "ts"
+            | "tsx"
+            | "js"
+            | "mjs"
+            | "cjs"
+            | "jsx"
+            | "go"
+            | "java"
+            | "cs"
+            | "c"
+            | "h"
+            | "cpp"
+            | "cc"
+            | "cxx"
+            | "hpp"
+            | "hxx"
+            | "rb"
+            | "sh"
+            | "bash"
+            | "php"
+            | "swift"
     )
 }
 

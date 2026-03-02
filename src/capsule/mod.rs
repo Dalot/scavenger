@@ -149,9 +149,8 @@ pub fn assemble(
 
     // Stage 6: RENDER
     let t5 = Instant::now();
-    let remaining = effective_budget.saturating_sub(
-        candidates.iter().map(|c| c.token_count).sum::<u32>(),
-    );
+    let remaining =
+        effective_budget.saturating_sub(candidates.iter().map(|c| c.token_count).sum::<u32>());
 
     let target_body = query_result.target.as_ref().and_then(|tid| {
         let node = graph.get_weight(tid)?;

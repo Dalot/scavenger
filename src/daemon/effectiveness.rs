@@ -1,5 +1,5 @@
 use rusqlite::Connection;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 /// Per-capsule effectiveness signals.
 /// An effective capsule means the agent used the provided context and did not

@@ -2,9 +2,9 @@
 
 use rusqlite::Connection;
 use scavenger::db::schema;
-use scavenger::memory::{annotations, signals, session, versions};
-use scavenger::graph::types::{NodeId, NodeKind};
 use scavenger::graph::index::ExtractedSymbol;
+use scavenger::graph::types::{NodeId, NodeKind};
+use scavenger::memory::{annotations, session, signals, versions};
 
 fn setup() -> Connection {
     let conn = Connection::open_in_memory().unwrap();
@@ -35,20 +35,30 @@ fn test_annotation_create_read_update_delete() {
     let conn = setup();
 
     annotations::upsert_annotation(
-        &conn, "a1",
-        Some(annotations::AnchorType::Node), Some("n1"),
-        "first version", None, annotations::AnnotationKind::Fact,
-    ).unwrap();
+        &conn,
+        "a1",
+        Some(annotations::AnchorType::Node),
+        Some("n1"),
+        "first version",
+        None,
+        annotations::AnnotationKind::Fact,
+    )
+    .unwrap();
 
     let anns = annotations::read_by_anchor(&conn, "node", "n1").unwrap();
     assert_eq!(anns.len(), 1);
     assert_eq!(anns[0].text, "first version");
 
     annotations::upsert_annotation(
-        &conn, "a1",
-        Some(annotations::AnchorType::Node), Some("n1"),
-        "updated version", Some("important"), annotations::AnnotationKind::Fact,
-    ).unwrap();
+        &conn,
+        "a1",
+        Some(annotations::AnchorType::Node),
+        Some("n1"),
+        "updated version",
+        Some("important"),
+        annotations::AnnotationKind::Fact,
+    )
+    .unwrap();
 
     let anns = annotations::read_by_anchor(&conn, "node", "n1").unwrap();
     assert_eq!(anns.len(), 1);
@@ -63,12 +73,49 @@ fn test_annotation_create_read_update_delete() {
 fn test_annotation_anchor_types() {
     let conn = setup();
 
-    annotations::upsert_annotation(&conn, "f1", Some(annotations::AnchorType::File), Some("/test.rs"), "file note", None, annotations::AnnotationKind::Fact).unwrap();
-    annotations::upsert_annotation(&conn, "s1", Some(annotations::AnchorType::Scope), Some("auth"), "scope note", None, annotations::AnnotationKind::Strategy).unwrap();
-    annotations::upsert_annotation(&conn, "p1", Some(annotations::AnchorType::Project), None, "project note", None, annotations::AnnotationKind::Context).unwrap();
+    annotations::upsert_annotation(
+        &conn,
+        "f1",
+        Some(annotations::AnchorType::File),
+        Some("/test.rs"),
+        "file note",
+        None,
+        annotations::AnnotationKind::Fact,
+    )
+    .unwrap();
+    annotations::upsert_annotation(
+        &conn,
+        "s1",
+        Some(annotations::AnchorType::Scope),
+        Some("auth"),
+        "scope note",
+        None,
+        annotations::AnnotationKind::Strategy,
+    )
+    .unwrap();
+    annotations::upsert_annotation(
+        &conn,
+        "p1",
+        Some(annotations::AnchorType::Project),
+        None,
+        "project note",
+        None,
+        annotations::AnnotationKind::Context,
+    )
+    .unwrap();
 
-    assert_eq!(annotations::read_by_anchor(&conn, "file", "/test.rs").unwrap().len(), 1);
-    assert_eq!(annotations::read_by_anchor(&conn, "scope", "auth").unwrap().len(), 1);
+    assert_eq!(
+        annotations::read_by_anchor(&conn, "file", "/test.rs")
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(
+        annotations::read_by_anchor(&conn, "scope", "auth")
+            .unwrap()
+            .len(),
+        1
+    );
 }
 
 // ── Version tests ──
@@ -99,7 +146,15 @@ fn test_version_ordinal_decay() {
 #[test]
 fn test_signal_insert_query() {
     let conn = setup();
-    signals::insert_signal(&conn, signals::SignalKind::Thrashing, Some("n1"), None, "s1", Some("details")).unwrap();
+    signals::insert_signal(
+        &conn,
+        signals::SignalKind::Thrashing,
+        Some("n1"),
+        None,
+        "s1",
+        Some("details"),
+    )
+    .unwrap();
     let sigs = signals::signals_for_node(&conn, "n1", 10).unwrap();
     assert_eq!(sigs.len(), 1);
     assert_eq!(sigs[0].kind, "THRASHING");
@@ -108,8 +163,24 @@ fn test_signal_insert_query() {
 #[test]
 fn test_signal_active_count() {
     let conn = setup();
-    signals::insert_signal(&conn, signals::SignalKind::DeadEnd, Some("n1"), None, "s1", None).unwrap();
-    signals::insert_signal(&conn, signals::SignalKind::Untested, Some("n2"), None, "s1", None).unwrap();
+    signals::insert_signal(
+        &conn,
+        signals::SignalKind::DeadEnd,
+        Some("n1"),
+        None,
+        "s1",
+        None,
+    )
+    .unwrap();
+    signals::insert_signal(
+        &conn,
+        signals::SignalKind::Untested,
+        Some("n2"),
+        None,
+        "s1",
+        None,
+    )
+    .unwrap();
     assert_eq!(signals::active_signal_count(&conn).unwrap(), 2);
 }
 

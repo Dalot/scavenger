@@ -28,20 +28,44 @@ impl std::fmt::Display for Intent {
 }
 
 const DEBUG_KEYWORDS: &[&str] = &[
-    "error", "bug", "fix", "crash", "failing", "broken", "traceback", "panic", "why is",
+    "error",
+    "bug",
+    "fix",
+    "crash",
+    "failing",
+    "broken",
+    "traceback",
+    "panic",
+    "why is",
 ];
 const REFACTOR_KEYWORDS: &[&str] = &[
-    "refactor", "clean up", "simplify", "extract", "rename", "restructure", "move", "split",
+    "refactor",
+    "clean up",
+    "simplify",
+    "extract",
+    "rename",
+    "restructure",
+    "move",
+    "split",
 ];
 const UNDERSTAND_KEYWORDS: &[&str] = &[
-    "explain", "what does", "how does", "walk me through", "overview", "describe", "where is",
+    "explain",
+    "what does",
+    "how does",
+    "walk me through",
+    "overview",
+    "describe",
+    "where is",
 ];
 const EXTEND_KEYWORDS: &[&str] = &[
-    "add", "implement", "create", "new feature", "integrate", "build",
+    "add",
+    "implement",
+    "create",
+    "new feature",
+    "integrate",
+    "build",
 ];
-const REVIEW_KEYWORDS: &[&str] = &[
-    "review", "check", "audit", "inspect", "validate",
-];
+const REVIEW_KEYWORDS: &[&str] = &["review", "check", "audit", "inspect", "validate"];
 
 struct IntentKeywords {
     intent: Intent,
@@ -49,11 +73,26 @@ struct IntentKeywords {
 }
 
 const ALL_INTENTS: &[IntentKeywords] = &[
-    IntentKeywords { intent: Intent::Debug, keywords: DEBUG_KEYWORDS },
-    IntentKeywords { intent: Intent::Refactor, keywords: REFACTOR_KEYWORDS },
-    IntentKeywords { intent: Intent::Understand, keywords: UNDERSTAND_KEYWORDS },
-    IntentKeywords { intent: Intent::Extend, keywords: EXTEND_KEYWORDS },
-    IntentKeywords { intent: Intent::Review, keywords: REVIEW_KEYWORDS },
+    IntentKeywords {
+        intent: Intent::Debug,
+        keywords: DEBUG_KEYWORDS,
+    },
+    IntentKeywords {
+        intent: Intent::Refactor,
+        keywords: REFACTOR_KEYWORDS,
+    },
+    IntentKeywords {
+        intent: Intent::Understand,
+        keywords: UNDERSTAND_KEYWORDS,
+    },
+    IntentKeywords {
+        intent: Intent::Extend,
+        keywords: EXTEND_KEYWORDS,
+    },
+    IntentKeywords {
+        intent: Intent::Review,
+        keywords: REVIEW_KEYWORDS,
+    },
 ];
 
 #[derive(Debug, Clone)]
@@ -175,33 +214,54 @@ mod tests {
 
     #[test]
     fn test_debug_keywords() {
-        assert_eq!(classify("why is this function crashing").primary, Intent::Debug);
+        assert_eq!(
+            classify("why is this function crashing").primary,
+            Intent::Debug
+        );
         assert_eq!(classify("fix the bug in auth").primary, Intent::Debug);
         assert_eq!(classify("error handling in parser").primary, Intent::Debug);
     }
 
     #[test]
     fn test_refactor_keywords() {
-        assert_eq!(classify("refactor the auth module").primary, Intent::Refactor);
+        assert_eq!(
+            classify("refactor the auth module").primary,
+            Intent::Refactor
+        );
         assert_eq!(classify("simplify this function").primary, Intent::Refactor);
     }
 
     #[test]
     fn test_understand_keywords() {
-        assert_eq!(classify("explain how auth works").primary, Intent::Understand);
-        assert_eq!(classify("what does validateToken do").primary, Intent::Understand);
-        assert_eq!(classify("where is the config loaded").primary, Intent::Understand);
+        assert_eq!(
+            classify("explain how auth works").primary,
+            Intent::Understand
+        );
+        assert_eq!(
+            classify("what does validateToken do").primary,
+            Intent::Understand
+        );
+        assert_eq!(
+            classify("where is the config loaded").primary,
+            Intent::Understand
+        );
     }
 
     #[test]
     fn test_extend_keywords() {
-        assert_eq!(classify("add caching to the query engine").primary, Intent::Extend);
+        assert_eq!(
+            classify("add caching to the query engine").primary,
+            Intent::Extend
+        );
         assert_eq!(classify("implement rate limiting").primary, Intent::Extend);
     }
 
     #[test]
     fn test_review_keywords() {
-        assert_eq!(classify("review the database module").primary, Intent::Review);
+        assert_eq!(
+            classify("review the database module").primary,
+            Intent::Review
+        );
         assert_eq!(classify("audit security of auth").primary, Intent::Review);
     }
 
@@ -218,7 +278,8 @@ mod tests {
         assert!(
             r.secondary.is_some(),
             "Expected multi-intent, got single: {:?} (weight: {})",
-            r.primary, r.primary_weight
+            r.primary,
+            r.primary_weight
         );
     }
 }

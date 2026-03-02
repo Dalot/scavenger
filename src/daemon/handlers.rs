@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use std::time::Instant;
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use super::DaemonState;
 use crate::capsule;
@@ -114,8 +114,14 @@ async fn handle_capsule(state: &Arc<DaemonState>, request: &Value) -> Value {
     let total_us = start.elapsed().as_micros() as u64;
 
     state.metrics.capsule_latency_us.record(total_us);
-    state.metrics.capsule_tokens.record(result.token_count as u64);
-    state.metrics.capsule_items.record(result.items_included as u64);
+    state
+        .metrics
+        .capsule_tokens
+        .record(result.token_count as u64);
+    state
+        .metrics
+        .capsule_items
+        .record(result.items_included as u64);
     if result.text.is_empty() {
         state.metrics.capsule_empty.inc();
     }
@@ -161,7 +167,8 @@ async fn handle_capsule(state: &Arc<DaemonState>, request: &Value) -> Value {
     }
 
     // Token logging
-    let estimated = crate::graph::estimator::estimate_without_index(conn, "get_capsule", Some(file));
+    let estimated =
+        crate::graph::estimator::estimate_without_index(conn, "get_capsule", Some(file));
     {
         let session = state.session_id.read().clone();
         let branch = state.current_branch.read().clone();
@@ -205,7 +212,10 @@ async fn handle_hook_pre(state: &Arc<DaemonState>, request: &Value) -> Value {
     let result = handle_capsule(state, &capsule_req).await;
     let capsule_text = result.get("capsule").and_then(|v| v.as_str()).unwrap_or("");
     let injected = !capsule_text.is_empty();
-    let tokens = result.get("token_count").and_then(|v| v.as_u64()).unwrap_or(0);
+    let tokens = result
+        .get("token_count")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
 
     state.metrics.hook_pre_count.inc();
     if injected {
@@ -284,10 +294,7 @@ async fn handle_annotation_read(state: &Arc<DaemonState>, request: &Value) -> Va
         .get("session_summary")
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
-    let limit = request
-        .get("limit")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(20) as u32;
+    let limit = request.get("limit").and_then(|v| v.as_u64()).unwrap_or(20) as u32;
 
     let conn_guard = state.branch_db.lock();
     let Some(ref conn) = *conn_guard else {
@@ -296,14 +303,16 @@ async fn handle_annotation_read(state: &Arc<DaemonState>, request: &Value) -> Va
 
     if session_summary_mode {
         let session_id = state.session_id.read().clone();
-        let summary = crate::memory::session::session_summary(conn, &session_id)
-            .unwrap_or_else(|_| crate::memory::session::SessionSummary {
-                session_id: session_id.clone(),
-                total_events: 0,
-                unique_files: 0,
-                unique_symbols: 0,
-                recent_events: vec![],
-                files_touched: vec![],
+        let summary =
+            crate::memory::session::session_summary(conn, &session_id).unwrap_or_else(|_| {
+                crate::memory::session::SessionSummary {
+                    session_id: session_id.clone(),
+                    total_events: 0,
+                    unique_files: 0,
+                    unique_symbols: 0,
+                    recent_events: vec![],
+                    files_touched: vec![],
+                }
             });
 
         let active_signals = crate::memory::signals::active_signal_count(conn).unwrap_or(0);
@@ -408,8 +417,14 @@ async fn handle_annotation_write(state: &Arc<DaemonState>, request: &Value) -> V
         .map(String::from)
         .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
 
-    let mut anchor_type = request.get("anchor_type").and_then(|v| v.as_str()).map(String::from);
-    let mut anchor_value = request.get("anchor_value").and_then(|v| v.as_str()).map(String::from);
+    let mut anchor_type = request
+        .get("anchor_type")
+        .and_then(|v| v.as_str())
+        .map(String::from);
+    let mut anchor_value = request
+        .get("anchor_value")
+        .and_then(|v| v.as_str())
+        .map(String::from);
     let tags = request.get("tags").and_then(|v| v.as_str());
 
     let conn_guard = state.branch_db.lock();
@@ -456,12 +471,27 @@ async fn handle_annotation_write(state: &Arc<DaemonState>, request: &Value) -> V
     let at_str = anchor_type.as_deref();
     let av_str = anchor_value.as_deref();
 
-    let kind_str = request.get("kind").and_then(|v| v.as_str()).unwrap_or("fact");
+    let kind_str = request
+        .get("kind")
+        .and_then(|v| v.as_str())
+        .unwrap_or("fact");
     let kind = crate::memory::annotations::AnnotationKind::from_str(kind_str);
 
-    match crate::memory::annotations::upsert_annotation(conn, &id, at_str.and_then(crate::memory::annotations::AnchorType::from_str), av_str, text, tags, kind) {
+    match crate::memory::annotations::upsert_annotation(
+        conn,
+        &id,
+        at_str.and_then(crate::memory::annotations::AnchorType::from_str),
+        av_str,
+        text,
+        tags,
+        kind,
+    ) {
         Ok(result) => {
-            let status = if result.deduplicated { "deduplicated" } else { "created" };
+            let status = if result.deduplicated {
+                "deduplicated"
+            } else {
+                "created"
+            };
             state.metrics.annotation_writes.inc();
             if result.deduplicated {
                 state.metrics.annotation_dedup.inc();
@@ -497,21 +527,29 @@ async fn handle_annotation_delete(state: &Arc<DaemonState>, request: &Value) -> 
         return json!({ "error": "no database" });
     };
 
-    let result = match conn.execute("DELETE FROM annotations WHERE id = ?1", rusqlite::params![id]) {
+    let result = match conn.execute(
+        "DELETE FROM annotations WHERE id = ?1",
+        rusqlite::params![id],
+    ) {
         Ok(0) => json!({ "error": "not found" }),
         Ok(_) => json!({ "status": "deleted" }),
         Err(e) => json!({ "error": e.to_string() }),
     };
 
-    let status = result.get("status").or_else(|| result.get("error"))
-        .and_then(|v| v.as_str()).unwrap_or("unknown");
+    let status = result
+        .get("status")
+        .or_else(|| result.get("error"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("unknown");
     tracing::info!(annotation_id = %id, status, "annotation_delete");
     result
 }
 
 async fn handle_metrics(state: &Arc<DaemonState>) -> Value {
     let graph = state.graph.read();
-    state.metrics.snapshot(graph.node_count(), graph.edge_count())
+    state
+        .metrics
+        .snapshot(graph.node_count(), graph.edge_count())
 }
 
 async fn handle_effectiveness(state: &Arc<DaemonState>, request: &Value) -> Value {
@@ -532,10 +570,7 @@ async fn handle_effectiveness(state: &Arc<DaemonState>, request: &Value) -> Valu
 
 async fn handle_search_docs(state: &Arc<DaemonState>, request: &Value) -> Value {
     let query = request.get("query").and_then(|v| v.as_str()).unwrap_or("");
-    let limit = request
-        .get("limit")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(10) as u32;
+    let limit = request.get("limit").and_then(|v| v.as_u64()).unwrap_or(10) as u32;
 
     if query.is_empty() {
         return json!({ "results": [] });

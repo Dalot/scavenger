@@ -32,12 +32,7 @@ pub fn chunk_markdown(content: &str) -> Vec<DocChunk> {
     for (i, line) in lines.iter().enumerate() {
         if line.starts_with('#') {
             if !current_lines.is_empty() {
-                emit_chunks(
-                    &current_heading,
-                    current_start,
-                    &current_lines,
-                    &mut chunks,
-                );
+                emit_chunks(&current_heading, current_start, &current_lines, &mut chunks);
             }
             current_heading = Some(line.trim_start_matches('#').trim().to_string());
             current_start = i;
@@ -48,12 +43,7 @@ pub fn chunk_markdown(content: &str) -> Vec<DocChunk> {
     }
 
     if !current_lines.is_empty() {
-        emit_chunks(
-            &current_heading,
-            current_start,
-            &current_lines,
-            &mut chunks,
-        );
+        emit_chunks(&current_heading, current_start, &current_lines, &mut chunks);
     }
 
     chunks
@@ -143,7 +133,11 @@ pub fn index_doc_file(
 }
 
 /// Collect all doc files under a root directory using the `ignore` crate.
-pub fn collect_doc_files(root: &Path, _patterns: &[String], exclude: &[String]) -> Vec<std::path::PathBuf> {
+pub fn collect_doc_files(
+    root: &Path,
+    _patterns: &[String],
+    exclude: &[String],
+) -> Vec<std::path::PathBuf> {
     let mut files = Vec::new();
     let walker = ignore::WalkBuilder::new(root)
         .hidden(true)
@@ -195,7 +189,11 @@ mod tests {
         let lines: Vec<String> = (0..150).map(|i| format!("Line {i}")).collect();
         let content = format!("# Medium\n{}", lines.join("\n"));
         let chunks = chunk_markdown(&content);
-        assert_eq!(chunks.len(), 1, "sections <= 200 lines should not be sub-split");
+        assert_eq!(
+            chunks.len(),
+            1,
+            "sections <= 200 lines should not be sub-split"
+        );
     }
 
     #[test]
@@ -203,7 +201,10 @@ mod tests {
         let lines: Vec<String> = (0..250).map(|i| format!("Line {i}")).collect();
         let content = format!("# Long\n{}", lines.join("\n"));
         let chunks = chunk_markdown(&content);
-        assert!(chunks.len() >= 3, "sections > 200 lines should be sub-split at 100-line chunks");
+        assert!(
+            chunks.len() >= 3,
+            "sections > 200 lines should be sub-split at 100-line chunks"
+        );
     }
 
     #[test]

@@ -1,5 +1,5 @@
 #![allow(dead_code)]
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{Connection, OptionalExtension, params};
 
 use super::DbResult;
 use crate::graph::types::{Confidence, EdgeKind, NodeKind};
@@ -103,8 +103,7 @@ pub struct EdgeRow {
 }
 
 pub fn get_all_edges(conn: &Connection) -> DbResult<Vec<EdgeRow>> {
-    let mut stmt =
-        conn.prepare("SELECT from_id, to_id, kind, weight, confidence FROM edges")?;
+    let mut stmt = conn.prepare("SELECT from_id, to_id, kind, weight, confidence FROM edges")?;
     let rows = stmt
         .query_map([], |row| {
             Ok(EdgeRow {
@@ -233,9 +232,8 @@ pub fn find_annotation_by_content_hash(
 }
 
 pub fn increment_retrieval_count(conn: &Connection, ids: &[String]) -> DbResult<()> {
-    let mut stmt = conn.prepare(
-        "UPDATE annotations SET retrieval_count = retrieval_count + 1 WHERE id = ?1",
-    )?;
+    let mut stmt =
+        conn.prepare("UPDATE annotations SET retrieval_count = retrieval_count + 1 WHERE id = ?1")?;
     for id in ids {
         stmt.execute(params![id])?;
     }

@@ -1,7 +1,7 @@
 use std::collections::{HashSet, VecDeque};
 
-use petgraph::visit::EdgeRef;
 use petgraph::Direction;
+use petgraph::visit::EdgeRef;
 
 use super::GraphState;
 use super::types::NodeId;
@@ -162,7 +162,10 @@ mod tests {
         g.add_edge(&NodeId("a".into()), &NodeId("b".into()), edge());
         g.add_edge(&NodeId("b".into()), &NodeId("c".into()), edge());
 
-        let params = TraversalParams { max_hops: 2, ..Default::default() };
+        let params = TraversalParams {
+            max_hops: 2,
+            ..Default::default()
+        };
         let result = bfs_collect(&g, &NodeId("a".into()), Direction::Outgoing, &params);
         assert_eq!(result.len(), 2);
     }
@@ -217,7 +220,10 @@ mod tests {
         g.add_edge(&NodeId("caller".into()), &NodeId("target".into()), edge());
         g.add_edge(&NodeId("target".into()), &NodeId("callee".into()), edge());
 
-        let params = TraversalParams { max_hops: 1, ..Default::default() };
+        let params = TraversalParams {
+            max_hops: 1,
+            ..Default::default()
+        };
         let result = bidirectional_bfs(&g, &NodeId("target".into()), &params);
         assert_eq!(result.len(), 2);
     }

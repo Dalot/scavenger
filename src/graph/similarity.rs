@@ -116,7 +116,8 @@ fn extract_param_names(sig: &str) -> HashSet<String> {
                 let trimmed = param.trim();
                 if let Some(name) = trimmed.split(':').next() {
                     let name = name.split_whitespace().last().unwrap_or("").trim();
-                    if !name.is_empty() && name != "self" && name != "&self" && name != "&mut self" {
+                    if !name.is_empty() && name != "self" && name != "&self" && name != "&mut self"
+                    {
                         params.insert(name.to_string());
                     }
                 }
@@ -163,7 +164,11 @@ fn jaccard_index(a: &HashSet<String>, b: &HashSet<String>) -> f64 {
     }
     let intersection = a.intersection(b).count() as f64;
     let union = a.union(b).count() as f64;
-    if union == 0.0 { 0.0 } else { intersection / union }
+    if union == 0.0 {
+        0.0
+    } else {
+        intersection / union
+    }
 }
 
 fn jaccard_index_set(a: &HashSet<NodeId>, b: &HashSet<NodeId>) -> f64 {
@@ -172,14 +177,18 @@ fn jaccard_index_set(a: &HashSet<NodeId>, b: &HashSet<NodeId>) -> f64 {
     }
     let intersection = a.intersection(b).count() as f64;
     let union = a.union(b).count() as f64;
-    if union == 0.0 { 0.0 } else { intersection / union }
+    if union == 0.0 {
+        0.0
+    } else {
+        intersection / union
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::PathBuf;
     use crate::graph::types::NodeKind;
+    use std::path::PathBuf;
 
     fn make_node(name: &str, sig: &str, checksum: &[u8]) -> NodeWeight {
         NodeWeight {
@@ -219,23 +228,40 @@ mod tests {
         let old = make_node("foo", "fn foo(x: i32) -> bool", &[0xDE, 0xAD]);
         let new = make_extracted("foo", "fn foo(x: i32) -> bool", &[0xDE, 0xAD]);
         let score = compute_similarity(&old, &new, &HashSet::new(), &HashSet::new(), true);
-        assert!(score > 0.8, "identical nodes should score > 0.8, got {score}");
+        assert!(
+            score > 0.8,
+            "identical nodes should score > 0.8, got {score}"
+        );
     }
 
     #[test]
     fn test_renamed_function_moderate_score() {
         let old = make_node("get_user", "fn get_user(id: i32) -> User", &[0xDE, 0xAD]);
-        let new = make_extracted("fetch_user", "fn fetch_user(id: i32) -> User", &[0xDE, 0xAD]);
+        let new = make_extracted(
+            "fetch_user",
+            "fn fetch_user(id: i32) -> User",
+            &[0xDE, 0xAD],
+        );
         let score = compute_similarity(&old, &new, &HashSet::new(), &HashSet::new(), true);
-        assert!(score > 0.6, "renamed with same body should score > 0.6, got {score}");
+        assert!(
+            score > 0.6,
+            "renamed with same body should score > 0.6, got {score}"
+        );
     }
 
     #[test]
     fn test_completely_different_low_score() {
         let old = make_node("parse_json", "fn parse_json(s: &str) -> Value", &[0x01]);
-        let new = make_extracted("render_html", "fn render_html(ctx: Context) -> String", &[0xFF]);
+        let new = make_extracted(
+            "render_html",
+            "fn render_html(ctx: Context) -> String",
+            &[0xFF],
+        );
         let score = compute_similarity(&old, &new, &HashSet::new(), &HashSet::new(), true);
-        assert!(score < 0.6, "completely different should score < 0.6, got {score}");
+        assert!(
+            score < 0.6,
+            "completely different should score < 0.6, got {score}"
+        );
     }
 
     #[test]

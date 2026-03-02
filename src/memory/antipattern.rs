@@ -6,8 +6,8 @@ use rusqlite::Connection;
 
 use petgraph::visit::EdgeRef;
 
-use crate::graph::types::NodeId;
 use crate::graph::GraphState;
+use crate::graph::types::NodeId;
 use crate::memory::signals::{self, SignalKind};
 
 /// Dedup key: (signal_kind_str, entity_key)
@@ -74,7 +74,10 @@ impl AntiPatternDetector {
             return;
         }
 
-        let buffer = self.thrashing_buffer.entry(node_id.to_string()).or_default();
+        let buffer = self
+            .thrashing_buffer
+            .entry(node_id.to_string())
+            .or_default();
 
         if let Some(ref checksum) = context.new_checksum {
             buffer.push_back(EditEntry {
@@ -94,10 +97,7 @@ impl AntiPatternDetector {
             let checksums: Vec<&[u8]> = buffer.iter().map(|e| e.checksum.as_slice()).collect();
             let mut similar_count = 0;
             for w in checksums.windows(2) {
-                let sim = strsim::normalized_levenshtein(
-                    &hex_encode(w[0]),
-                    &hex_encode(w[1]),
-                );
+                let sim = strsim::normalized_levenshtein(&hex_encode(w[0]), &hex_encode(w[1]));
                 if sim > 0.9 {
                     similar_count += 1;
                 }
@@ -171,7 +171,9 @@ impl AntiPatternDetector {
         let from_nid = NodeId(from.to_string());
         let to_nid = NodeId(to.to_string());
 
-        if let (Some(from_idx), Some(to_idx)) = (graph.get_index(&from_nid), graph.get_index(&to_nid)) {
+        if let (Some(from_idx), Some(to_idx)) =
+            (graph.get_index(&from_nid), graph.get_index(&to_nid))
+        {
             if petgraph::algo::has_path_connecting(&graph.graph, to_idx, from_idx, None) {
                 self.fired.insert(key);
                 let _ = signals::insert_signal(
@@ -223,7 +225,10 @@ impl AntiPatternDetector {
             queue.push_back(start_idx);
 
             while let Some(idx) = queue.pop_front() {
-                for edge in graph.graph.edges_directed(idx, petgraph::Direction::Incoming) {
+                for edge in graph
+                    .graph
+                    .edges_directed(idx, petgraph::Direction::Incoming)
+                {
                     let src = edge.source();
                     if visited.insert(src) {
                         queue.push_back(src);
@@ -326,7 +331,10 @@ impl AntiPatternDetector {
             return;
         }
 
-        let count = self.failed_search_counts.entry(normalized.clone()).or_insert(0);
+        let count = self
+            .failed_search_counts
+            .entry(normalized.clone())
+            .or_insert(0);
         *count += 1;
 
         if *count >= 3 {
@@ -337,7 +345,9 @@ impl AntiPatternDetector {
                 None,
                 None,
                 session_id,
-                Some(&format!("Query \"{normalized}\" returned 0 results {count} times")),
+                Some(&format!(
+                    "Query \"{normalized}\" returned 0 results {count} times"
+                )),
             );
         }
     }
@@ -391,7 +401,11 @@ mod tests {
         detector.record_search_miss(&conn, "s1", "FOOBAR");
 
         // Should have fired after 3rd miss
-        assert!(detector.fired.contains(&("FAILED_SEARCH".to_string(), "foobar".to_string())));
+        assert!(
+            detector
+                .fired
+                .contains(&("FAILED_SEARCH".to_string(), "foobar".to_string()))
+        );
 
         // 4th call should be no-op (dedup)
         detector.record_search_miss(&conn, "s1", "foobar");

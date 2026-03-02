@@ -92,7 +92,10 @@ pub fn handle_audit(scavenger_dir: &Path) -> Result<(), Box<dyn std::error::Erro
     match event_name.as_str() {
         // Cursor camelCase events
         "postToolUse" => {
-            evt.tool_name = input.get("tool_name").and_then(|v| v.as_str()).map(String::from);
+            evt.tool_name = input
+                .get("tool_name")
+                .and_then(|v| v.as_str())
+                .map(String::from);
             evt.input_bytes = input
                 .get("tool_input")
                 .map(|v| serde_json::to_string(v).unwrap_or_default().len());
@@ -103,7 +106,10 @@ pub fn handle_audit(scavenger_dir: &Path) -> Result<(), Box<dyn std::error::Erro
             evt.duration_ms = input.get("duration").and_then(|v| v.as_u64());
         }
         "afterMCPExecution" => {
-            evt.tool_name = input.get("tool_name").and_then(|v| v.as_str()).map(String::from);
+            evt.tool_name = input
+                .get("tool_name")
+                .and_then(|v| v.as_str())
+                .map(String::from);
             evt.input_bytes = input
                 .get("tool_input")
                 .and_then(|v| v.as_str())
@@ -116,20 +122,27 @@ pub fn handle_audit(scavenger_dir: &Path) -> Result<(), Box<dyn std::error::Erro
         }
         // Claude Code PascalCase events
         "PreToolUse" => {
-            evt.tool_name = input.get("tool_name").and_then(|v| v.as_str()).map(String::from);
+            evt.tool_name = input
+                .get("tool_name")
+                .and_then(|v| v.as_str())
+                .map(String::from);
             evt.input_bytes = input
                 .get("tool_input")
                 .map(|v| serde_json::to_string(v).unwrap_or_default().len());
         }
         "PostToolUse" | "PostToolUseFailure" => {
-            evt.tool_name = input.get("tool_name").and_then(|v| v.as_str()).map(String::from);
+            evt.tool_name = input
+                .get("tool_name")
+                .and_then(|v| v.as_str())
+                .map(String::from);
             evt.input_bytes = input
                 .get("tool_input")
                 .map(|v| serde_json::to_string(v).unwrap_or_default().len());
             evt.output_bytes = input
                 .get("tool_response")
                 .map(|v| serde_json::to_string(v).unwrap_or_default().len());
-            if let Some(path) = input.get("tool_input")
+            if let Some(path) = input
+                .get("tool_input")
                 .and_then(|v| v.get("file_path"))
                 .and_then(|v| v.as_str())
             {
@@ -137,9 +150,16 @@ pub fn handle_audit(scavenger_dir: &Path) -> Result<(), Box<dyn std::error::Erro
             }
         }
         "SessionStart" => {
-            evt.status = input.get("source").and_then(|v| v.as_str()).map(String::from);
+            evt.status = input
+                .get("source")
+                .and_then(|v| v.as_str())
+                .map(String::from);
             if evt.model.is_empty() {
-                evt.model = input.get("model").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                evt.model = input
+                    .get("model")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
             }
         }
         "Stop" => {
@@ -151,26 +171,44 @@ pub fn handle_audit(scavenger_dir: &Path) -> Result<(), Box<dyn std::error::Erro
             evt.context_usage_pct = input.get("context_usage_percent").and_then(|v| v.as_f64());
         }
         "SessionEnd" | "sessionEnd" => {
-            evt.status = input.get("status").or_else(|| input.get("reason"))
-                .and_then(|v| v.as_str()).map(String::from);
-            evt.loop_count = input.get("loop_count").and_then(|v| v.as_u64()).map(|v| v as u32);
+            evt.status = input
+                .get("status")
+                .or_else(|| input.get("reason"))
+                .and_then(|v| v.as_str())
+                .map(String::from);
+            evt.loop_count = input
+                .get("loop_count")
+                .and_then(|v| v.as_u64())
+                .map(|v| v as u32);
             evt.duration_ms = input.get("duration_ms").and_then(|v| v.as_u64());
         }
         "stop" => {
-            evt.status = input.get("status").or_else(|| input.get("reason"))
-                .and_then(|v| v.as_str()).map(String::from);
-            evt.loop_count = input.get("loop_count").and_then(|v| v.as_u64()).map(|v| v as u32);
+            evt.status = input
+                .get("status")
+                .or_else(|| input.get("reason"))
+                .and_then(|v| v.as_str())
+                .map(String::from);
+            evt.loop_count = input
+                .get("loop_count")
+                .and_then(|v| v.as_u64())
+                .map(|v| v as u32);
             evt.duration_ms = input.get("duration_ms").and_then(|v| v.as_u64());
         }
         "afterFileEdit" => {
-            evt.file_path = input.get("file_path").and_then(|v| v.as_str()).map(String::from);
+            evt.file_path = input
+                .get("file_path")
+                .and_then(|v| v.as_str())
+                .map(String::from);
         }
         _ => {}
     }
 
     let metrics_dir = scavenger_dir.join("metrics");
     if let Err(e) = std::fs::create_dir_all(&metrics_dir) {
-        eprintln!("scavenger audit: failed to create metrics dir {}: {e}", metrics_dir.display());
+        eprintln!(
+            "scavenger audit: failed to create metrics dir {}: {e}",
+            metrics_dir.display()
+        );
         super::print_json(&json!({}));
         return Ok(());
     }
@@ -190,7 +228,10 @@ pub fn handle_audit(scavenger_dir: &Path) -> Result<(), Box<dyn std::error::Erro
             }
         }
         Err(e) => {
-            eprintln!("scavenger audit: failed to open {}: {e}", log_path.display());
+            eprintln!(
+                "scavenger audit: failed to open {}: {e}",
+                log_path.display()
+            );
         }
     }
 
@@ -217,7 +258,9 @@ pub fn read_label(scavenger_dir: &Path, conversation_id: &str) -> Option<String>
     let label_path = scavenger_dir
         .join("metrics")
         .join(format!("{conversation_id}.label"));
-    std::fs::read_to_string(label_path).ok().map(|s| s.trim().to_string())
+    std::fs::read_to_string(label_path)
+        .ok()
+        .map(|s| s.trim().to_string())
 }
 
 // ── Metrics analysis ────────────────────────────────────────────────
@@ -362,7 +405,9 @@ pub fn analyze_session(scavenger_dir: &Path, conversation_id: &str) -> Option<Se
                 summary.compaction_count += 1;
                 if let Some(tokens) = evt.context_tokens {
                     summary.context_tokens_peak = Some(
-                        summary.context_tokens_peak.map_or(tokens, |prev: u64| prev.max(tokens)),
+                        summary
+                            .context_tokens_peak
+                            .map_or(tokens, |prev: u64| prev.max(tokens)),
                     );
                 }
                 if summary.context_window_size.is_none() {
@@ -435,7 +480,11 @@ pub fn format_list(scavenger_dir: &Path, sessions: &[String]) -> String {
 
     for id in sessions {
         if let Some(s) = analyze_session(scavenger_dir, id) {
-            let condition = if s.scavenger_active { "[WITH]" } else { "[WITHOUT]" };
+            let condition = if s.scavenger_active {
+                "[WITH]"
+            } else {
+                "[WITHOUT]"
+            };
             out.push_str(&format!(
                 "{:<10} {:<38} {:>6} {:>6} {:>6} {:>6} {:>10}\n",
                 condition,
@@ -459,10 +508,7 @@ pub fn format_comparison(a: &SessionSummary, b: &SessionSummary) -> String {
     let label_a = a.condition_label();
     let label_b = b.condition_label();
 
-    out.push_str(&format!(
-        "{:<34} {:>18} {:>18}\n",
-        "", label_a, label_b
-    ));
+    out.push_str(&format!("{:<34} {:>18} {:>18}\n", "", label_a, label_b));
     let short_a = &a.conversation_id[..8.min(a.conversation_id.len())];
     let short_b = &b.conversation_id[..8.min(b.conversation_id.len())];
     out.push_str(&format!(
@@ -479,20 +525,40 @@ pub fn format_comparison(a: &SessionSummary, b: &SessionSummary) -> String {
     out.push('\n');
 
     out.push_str("  NAVIGATION (how the agent explores)\n");
-    row(&mut out, "  File reads (Read tool)", a.file_reads, b.file_reads);
+    row(
+        &mut out,
+        "  File reads (Read tool)",
+        a.file_reads,
+        b.file_reads,
+    );
     row(&mut out, "  Grep calls", a.grep_calls, b.grep_calls);
-    row(&mut out, "  Semantic searches", a.search_calls, b.search_calls);
+    row(
+        &mut out,
+        "  Semantic searches",
+        a.search_calls,
+        b.search_calls,
+    );
     row(
         &mut out,
         "  Total navigation calls",
         a.navigation_calls(),
         b.navigation_calls(),
     );
-    row(&mut out, "  Capsule calls (get_capsule)", a.capsule_calls(), b.capsule_calls());
+    row(
+        &mut out,
+        "  Capsule calls (get_capsule)",
+        a.capsule_calls(),
+        b.capsule_calls(),
+    );
     out.push('\n');
 
     out.push_str("  WORK (what the agent produces)\n");
-    row(&mut out, "  Total tool calls", a.total_tool_calls, b.total_tool_calls);
+    row(
+        &mut out,
+        "  Total tool calls",
+        a.total_tool_calls,
+        b.total_tool_calls,
+    );
     row(&mut out, "  File edits", a.file_edits, b.file_edits);
     row(&mut out, "  MCP calls (all)", a.mcp_calls, b.mcp_calls);
     out.push('\n');
@@ -519,7 +585,12 @@ pub fn format_comparison(a: &SessionSummary, b: &SessionSummary) -> String {
     out.push('\n');
 
     out.push_str("  CONTEXT WINDOW\n");
-    row(&mut out, "  Compactions", a.compaction_count, b.compaction_count);
+    row(
+        &mut out,
+        "  Compactions",
+        a.compaction_count,
+        b.compaction_count,
+    );
     if a.context_tokens_peak.is_some() || b.context_tokens_peak.is_some() {
         row_u64(
             &mut out,
@@ -531,7 +602,12 @@ pub fn format_comparison(a: &SessionSummary, b: &SessionSummary) -> String {
     out.push('\n');
 
     out.push_str("  TIMING\n");
-    row_u64(&mut out, "  Tool execution (ms)", a.total_duration_ms, b.total_duration_ms);
+    row_u64(
+        &mut out,
+        "  Tool execution (ms)",
+        a.total_duration_ms,
+        b.total_duration_ms,
+    );
     if a.session_duration_ms.is_some() || b.session_duration_ms.is_some() {
         row_u64(
             &mut out,
@@ -588,26 +664,17 @@ fn delta_str(a: f64, b: f64) -> String {
 
 fn row(out: &mut String, label: &str, a: u32, b: u32) {
     let d = delta_str(a as f64, b as f64);
-    out.push_str(&format!(
-        "{:<34} {:>18} {:>18}{}\n",
-        label, a, b, d
-    ));
+    out.push_str(&format!("{:<34} {:>18} {:>18}{}\n", label, a, b, d));
 }
 
 fn row_usize(out: &mut String, label: &str, a: usize, b: usize) {
     let d = delta_str(a as f64, b as f64);
-    out.push_str(&format!(
-        "{:<34} {:>18} {:>18}{}\n",
-        label, a, b, d
-    ));
+    out.push_str(&format!("{:<34} {:>18} {:>18}{}\n", label, a, b, d));
 }
 
 fn row_u64(out: &mut String, label: &str, a: u64, b: u64) {
     let d = delta_str(a as f64, b as f64);
-    out.push_str(&format!(
-        "{:<34} {:>18} {:>18}{}\n",
-        label, a, b, d
-    ));
+    out.push_str(&format!("{:<34} {:>18} {:>18}{}\n", label, a, b, d));
 }
 
 /// Format a single session summary for display.
@@ -630,10 +697,7 @@ pub fn format_summary(s: &SessionSummary) -> String {
     out.push_str(&format!("  Grep calls:         {}\n", s.grep_calls));
     out.push_str(&format!("  Semantic searches:  {}\n", s.search_calls));
     out.push_str(&format!("  Capsule calls:      {}\n", s.capsule_calls()));
-    out.push_str(&format!(
-        "  Total navigation:   {}\n",
-        s.navigation_calls()
-    ));
+    out.push_str(&format!("  Total navigation:   {}\n", s.navigation_calls()));
 
     out.push_str("\nWork:\n");
     out.push_str(&format!("  Total tool calls:   {}\n", s.total_tool_calls));
@@ -655,7 +719,10 @@ pub fn format_summary(s: &SessionSummary) -> String {
         "  Output tokens:      {}\n",
         s.estimated_output_tokens()
     ));
-    out.push_str(&format!("  Tool time:          {} ms\n", s.total_duration_ms));
+    out.push_str(&format!(
+        "  Tool time:          {} ms\n",
+        s.total_duration_ms
+    ));
 
     if s.compaction_count > 0 {
         out.push_str(&format!("\nContext window:\n"));

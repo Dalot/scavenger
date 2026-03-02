@@ -3,14 +3,12 @@ pub mod register;
 
 use std::path::Path;
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 /// Handle PreToolUse hook invocation.
 /// Reads stdin JSON, connects to daemon UDS, requests capsule, writes stdout.
 /// Exit 0 always (fail open). Partial fallback at 100ms.
-pub async fn handle_pre_tool_use(
-    scavenger_dir: &Path,
-) -> Result<(), Box<dyn std::error::Error>> {
+pub async fn handle_pre_tool_use(scavenger_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
     let input = read_stdin_json()?;
 
     let tool_name = input
@@ -75,9 +73,7 @@ pub async fn handle_pre_tool_use(
 /// Handle PostToolUse hook invocation.
 /// Reads stdin JSON, enqueues re-index for Write/Edit/MultiEdit.
 /// Exit 0 always.
-pub async fn handle_post_tool_use(
-    scavenger_dir: &Path,
-) -> Result<(), Box<dyn std::error::Error>> {
+pub async fn handle_post_tool_use(scavenger_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
     let input = read_stdin_json()?;
 
     let tool_name = input

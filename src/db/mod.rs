@@ -9,7 +9,9 @@ use thiserror::Error;
 pub enum DbError {
     #[error("SQLite error: {0}")]
     Sqlite(#[from] rusqlite::Error),
-    #[error("schema version {found} is newer than supported {max} — refusing to open (downgrade guard)")]
+    #[error(
+        "schema version {found} is newer than supported {max} — refusing to open (downgrade guard)"
+    )]
     VersionTooNew { found: u32, max: u32 },
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),

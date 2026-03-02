@@ -103,22 +103,10 @@ pub fn create_cursor_hooks(project_root: &Path) -> Result<(), PluginError> {
             audit_cmd,
         ]),
     );
-    hooks.insert(
-        "postToolUse".into(),
-        json!([audit_cmd]),
-    );
-    hooks.insert(
-        "afterMCPExecution".into(),
-        json!([audit_cmd]),
-    );
-    hooks.insert(
-        "preCompact".into(),
-        json!([audit_cmd]),
-    );
-    hooks.insert(
-        "stop".into(),
-        json!([audit_cmd]),
-    );
+    hooks.insert("postToolUse".into(), json!([audit_cmd]));
+    hooks.insert("afterMCPExecution".into(), json!([audit_cmd]));
+    hooks.insert("preCompact".into(), json!([audit_cmd]));
+    hooks.insert("stop".into(), json!([audit_cmd]));
 
     std::fs::write(&hooks_path, serde_json::to_string_pretty(&config)?)?;
     Ok(())
@@ -152,8 +140,13 @@ pub fn remove_cursor_config(project_root: &Path) -> Result<(), PluginError> {
         if let Ok(mut config) = serde_json::from_str::<serde_json::Value>(&content) {
             if let Some(hooks) = config.get_mut("hooks").and_then(|v| v.as_object_mut()) {
                 for event in &[
-                    "sessionStart", "sessionEnd", "afterFileEdit",
-                    "postToolUse", "afterMCPExecution", "preCompact", "stop",
+                    "sessionStart",
+                    "sessionEnd",
+                    "afterFileEdit",
+                    "postToolUse",
+                    "afterMCPExecution",
+                    "preCompact",
+                    "stop",
                 ] {
                     remove_scavenger_cursor_hook(hooks, event);
                 }
@@ -161,9 +154,9 @@ pub fn remove_cursor_config(project_root: &Path) -> Result<(), PluginError> {
                     config.as_object_mut().unwrap().remove("hooks");
                 }
             }
-            let is_empty = config.as_object().is_some_and(|o| {
-                o.is_empty() || (o.len() == 1 && o.contains_key("version"))
-            });
+            let is_empty = config
+                .as_object()
+                .is_some_and(|o| o.is_empty() || (o.len() == 1 && o.contains_key("version")));
             if is_empty {
                 let _ = std::fs::remove_file(&hooks_path);
             } else {
@@ -683,7 +676,10 @@ mod tests {
 
         let content =
             std::fs::read_to_string(tmp.path().join(".claude/settings.local.json")).unwrap();
-        assert_eq!(content, "{ not valid json", "invalid file must not be modified");
+        assert_eq!(
+            content, "{ not valid json",
+            "invalid file must not be modified"
+        );
     }
 
     #[test]

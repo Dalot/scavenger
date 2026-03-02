@@ -7,8 +7,8 @@ use rusqlite::Connection;
 use tree_sitter::{Language, Parser};
 
 use crate::db::queries;
-use crate::graph::types::{Confidence, EdgeKind, EdgeWeight, NodeId, NodeKind, NodeWeight};
 use crate::graph::GraphState;
+use crate::graph::types::{Confidence, EdgeKind, EdgeWeight, NodeId, NodeKind, NodeWeight};
 
 /// Extracted symbol from a single parse.
 #[derive(Debug, Clone)]
@@ -49,7 +49,10 @@ pub fn detect_language(path: &Path) -> Option<(&'static str, Language)> {
     match ext {
         "rs" => Some(("rust", tree_sitter_rust::LANGUAGE.into())),
         "py" | "pyi" => Some(("python", tree_sitter_python::LANGUAGE.into())),
-        "ts" => Some(("typescript", tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into())),
+        "ts" => Some((
+            "typescript",
+            tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
+        )),
         "tsx" => Some(("tsx", tree_sitter_typescript::LANGUAGE_TSX.into())),
         "js" | "mjs" | "cjs" => Some(("javascript", tree_sitter_javascript::LANGUAGE.into())),
         "jsx" => Some(("jsx", tree_sitter_javascript::LANGUAGE.into())),
@@ -167,11 +170,7 @@ fn extract_symbols_recursive(
     }
 }
 
-fn classify_node(
-    node: tree_sitter::Node,
-    source: &[u8],
-    lang: &str,
-) -> Option<(NodeKind, String)> {
+fn classify_node(node: tree_sitter::Node, source: &[u8], lang: &str) -> Option<(NodeKind, String)> {
     let kind_str = node.kind();
 
     let (node_kind, name_field) = match lang {
@@ -285,19 +284,13 @@ fn classify_node(
     Some((node_kind, name))
 }
 
-fn classify_rust_impl(
-    node: tree_sitter::Node,
-    source: &[u8],
-) -> Option<(NodeKind, String)> {
+fn classify_rust_impl(node: tree_sitter::Node, source: &[u8]) -> Option<(NodeKind, String)> {
     let type_node = node.child_by_field_name("type")?;
     let name = type_node.utf8_text(source).ok()?.to_string();
     Some((NodeKind::Class, format!("impl {name}")))
 }
 
-fn classify_python_decorated(
-    node: tree_sitter::Node,
-    source: &[u8],
-) -> Option<(NodeKind, String)> {
+fn classify_python_decorated(node: tree_sitter::Node, source: &[u8]) -> Option<(NodeKind, String)> {
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
         match child.kind() {
@@ -315,11 +308,12 @@ fn classify_python_decorated(
     None
 }
 
-fn classify_go_type_spec(
-    node: tree_sitter::Node,
-    source: &[u8],
-) -> Option<(NodeKind, String)> {
-    let name = node.child_by_field_name("name")?.utf8_text(source).ok()?.to_string();
+fn classify_go_type_spec(node: tree_sitter::Node, source: &[u8]) -> Option<(NodeKind, String)> {
+    let name = node
+        .child_by_field_name("name")?
+        .utf8_text(source)
+        .ok()?
+        .to_string();
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
         match child.kind() {
@@ -345,11 +339,7 @@ fn extract_signature(node: tree_sitter::Node, source: &[u8]) -> String {
     text.lines().next().unwrap_or("").to_string()
 }
 
-fn extract_docstring(
-    node: tree_sitter::Node,
-    source: &[u8],
-    lang: &str,
-) -> Option<String> {
+fn extract_docstring(node: tree_sitter::Node, source: &[u8], lang: &str) -> Option<String> {
     match lang {
         "rust" => extract_rust_docstring(node, source),
         "python" => extract_python_docstring(node, source),
@@ -404,10 +394,7 @@ fn extract_python_docstring(node: tree_sitter::Node, source: &[u8]) -> Option<St
     None
 }
 
-fn extract_block_comment_docstring(
-    node: tree_sitter::Node,
-    source: &[u8],
-) -> Option<String> {
+fn extract_block_comment_docstring(node: tree_sitter::Node, source: &[u8]) -> Option<String> {
     let prev = node.prev_sibling()?;
     if prev.kind() == "comment" || prev.kind() == "block_comment" {
         let text = prev.utf8_text(source).ok()?;
@@ -822,14 +809,18 @@ pub fn incremental_reindex_swap(
         // Also include existing name→id mappings from the graph for cross-file edge resolution
         for idx in graph.graph.node_indices() {
             if let Some(w) = graph.graph.node_weight(idx) {
-                name_to_id.entry(w.name.clone()).or_insert_with(|| w.id.clone());
+                name_to_id
+                    .entry(w.name.clone())
+                    .or_insert_with(|| w.id.clone());
             }
         }
 
         for edge in &pr.edges {
             let to_id = if let Some(id) = name_to_id.get(&edge.to_name) {
                 id.clone()
-            } else if edge.confidence == Confidence::Heuristic || edge.confidence == Confidence::Speculative {
+            } else if edge.confidence == Confidence::Heuristic
+                || edge.confidence == Confidence::Speculative
+            {
                 // Create phantom node for unresolved callees (design §4.6)
                 let phantom_id = NodeId::compute("<unresolved>", &edge.to_name, &edge.to_name);
                 if name_to_id.contains_key(&edge.to_name) {
@@ -893,10 +884,7 @@ pub fn incremental_reindex_swap(
 
 /// Collect cross-file source files affected by changes in the given file.
 /// Uses the reverse index to find files whose nodes reference nodes in the changed file.
-pub fn cross_file_affected(
-    graph: &super::GraphState,
-    changed_file: &str,
-) -> Vec<PathBuf> {
+pub fn cross_file_affected(graph: &super::GraphState, changed_file: &str) -> Vec<PathBuf> {
     let changed_path = PathBuf::from(changed_file);
     let mut affected = std::collections::HashSet::new();
 
@@ -1003,7 +991,10 @@ struct Point {
         assert!(!result.symbols.is_empty());
         let names: Vec<&str> = result.symbols.iter().map(|s| s.name.as_str()).collect();
         assert!(names.contains(&"add"), "Expected 'add', found: {names:?}");
-        assert!(names.contains(&"Point"), "Expected 'Point', found: {names:?}");
+        assert!(
+            names.contains(&"Point"),
+            "Expected 'Point', found: {names:?}"
+        );
     }
 
     #[test]

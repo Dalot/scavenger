@@ -1,10 +1,10 @@
 // T066: Unit tests for similarity heuristic — scoring, threshold, matching.
 
-use std::collections::HashSet;
-use std::path::PathBuf;
-use scavenger::graph::types::*;
 use scavenger::graph::index::ExtractedSymbol;
 use scavenger::graph::similarity;
+use scavenger::graph::types::*;
+use std::collections::HashSet;
+use std::path::PathBuf;
 
 fn make_old(name: &str, sig: &str, checksum: &[u8]) -> NodeWeight {
     NodeWeight {
@@ -50,7 +50,11 @@ fn test_identical_symbols_score_above_threshold() {
 #[test]
 fn test_different_symbols_below_threshold() {
     let old = make_old("parse_json", "fn parse_json(s: &str) -> Value", &[0x01]);
-    let new = make_new("render_html", "fn render_html(ctx: Context) -> String", &[0xFF]);
+    let new = make_new(
+        "render_html",
+        "fn render_html(ctx: Context) -> String",
+        &[0xFF],
+    );
     let score = similarity::compute_similarity(&old, &new, &HashSet::new(), &HashSet::new(), true);
     assert!(score < 0.6, "different should be < 0.6, got {score}");
 }
@@ -68,9 +72,16 @@ fn test_threshold_boundary_059_no_match() {
 #[test]
 fn test_renamed_with_same_body_matches() {
     let old = make_old("get_user", "fn get_user(id: i32) -> User", &[0xDE, 0xAD]);
-    let new = make_new("fetch_user", "fn fetch_user(id: i32) -> User", &[0xDE, 0xAD]);
+    let new = make_new(
+        "fetch_user",
+        "fn fetch_user(id: i32) -> User",
+        &[0xDE, 0xAD],
+    );
     let score = similarity::compute_similarity(&old, &new, &HashSet::new(), &HashSet::new(), true);
-    assert!(score > 0.6, "renamed with same body should match, got {score}");
+    assert!(
+        score > 0.6,
+        "renamed with same body should match, got {score}"
+    );
 }
 
 #[test]
@@ -99,8 +110,13 @@ fn test_edge_neighborhood_affects_score() {
     let old_neighbors: HashSet<NodeId> = [shared_neighbor.clone()].into();
     let new_neighbors: HashSet<NodeId> = [shared_neighbor].into();
 
-    let score_with = similarity::compute_similarity(&old, &new, &old_neighbors, &new_neighbors, true);
-    let score_without = similarity::compute_similarity(&old, &new, &HashSet::new(), &HashSet::new(), true);
+    let score_with =
+        similarity::compute_similarity(&old, &new, &old_neighbors, &new_neighbors, true);
+    let score_without =
+        similarity::compute_similarity(&old, &new, &HashSet::new(), &HashSet::new(), true);
 
-    assert!(score_with > score_without, "shared neighbors should increase score");
+    assert!(
+        score_with > score_without,
+        "shared neighbors should increase score"
+    );
 }

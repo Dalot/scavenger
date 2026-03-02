@@ -5,15 +5,15 @@ use std::time::{Duration, Instant};
 use crossterm::{
     event::{self, Event, KeyCode, KeyModifiers},
     execute,
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
 use ratatui::{
+    Terminal,
     backend::CrosstermBackend,
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Bar, BarChart, BarGroup, Block, Borders, Paragraph, Row, Table},
-    Terminal,
 };
 use serde_json::Value;
 
@@ -123,9 +123,7 @@ fn refresh_log_entries(app: &mut AppState) {
         return;
     }
 
-    log_files.sort_by_key(|e| {
-        std::cmp::Reverse(e.metadata().ok().and_then(|m| m.modified().ok()))
-    });
+    log_files.sort_by_key(|e| std::cmp::Reverse(e.metadata().ok().and_then(|m| m.modified().ok())));
 
     let content = std::fs::read_to_string(log_files[0].path()).unwrap_or_default();
     let lines: Vec<&str> = content.lines().collect();
@@ -185,7 +183,7 @@ fn ui(f: &mut ratatui::Frame, app: &AppState) {
     let main_layout = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(1),  // title bar
+            Constraint::Length(1), // title bar
             Constraint::Min(8),    // body
             Constraint::Length(1), // footer
         ])
@@ -221,9 +219,7 @@ fn ui(f: &mut ratatui::Frame, app: &AppState) {
             Line::from(""),
             Line::from(Span::styled(
                 err.as_str(),
-                Style::default()
-                    .fg(Color::Red)
-                    .add_modifier(Modifier::BOLD),
+                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
             )),
             Line::from(""),
             Line::from("Start the daemon with: scavenger daemon"),
@@ -244,16 +240,11 @@ fn ui(f: &mut ratatui::Frame, app: &AppState) {
     f.render_widget(Paragraph::new(footer), main_layout[2]);
 }
 
-fn render_dashboard(
-    f: &mut ratatui::Frame,
-    area: Rect,
-    metrics: &Value,
-    log_lines: &[LogEntry],
-) {
+fn render_dashboard(f: &mut ratatui::Frame, area: Rect, metrics: &Value, log_lines: &[LogEntry]) {
     let body_layout = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(8),  // top stats
+            Constraint::Length(8), // top stats
             Constraint::Min(6),    // latency bars + log
         ])
         .split(area);

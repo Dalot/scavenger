@@ -1,11 +1,11 @@
 // T069: Integration test — concurrency: multi-threaded re-index safety.
 
-use std::sync::Arc;
 use parking_lot::RwLock;
 use scavenger::db::schema;
-use scavenger::graph::{index, GraphState};
 use scavenger::graph::types::*;
+use scavenger::graph::{GraphState, index};
 use std::path::PathBuf;
+use std::sync::Arc;
 
 fn node(id: &str, name: &str, file: &str) -> NodeWeight {
     NodeWeight {
@@ -97,5 +97,9 @@ fn test_split_phase_reindex_under_contention() {
 
     // Swap phase (needs write access)
     let stats = index::incremental_reindex_swap(&conn, &mut g, prep).unwrap();
-    assert!(stats.nodes_added >= 2, "should have >= 2 after swap, got {}", stats.nodes_added);
+    assert!(
+        stats.nodes_added >= 2,
+        "should have >= 2 after swap, got {}",
+        stats.nodes_added
+    );
 }

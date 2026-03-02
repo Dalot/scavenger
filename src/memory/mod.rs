@@ -6,8 +6,8 @@ pub mod versions;
 
 use rusqlite::Connection;
 
-use crate::graph::index::ExtractedSymbol;
 use crate::graph::GraphState;
+use crate::graph::index::ExtractedSymbol;
 
 /// Three-layer memory orchestrator.
 ///
@@ -60,8 +60,7 @@ impl MemoryManager {
             // in the current session, decay annotation quality
             if let Ok(sigs) = signals::signals_for_node(conn, &sym.id.0, 5) {
                 let has_negative = sigs.iter().any(|s| {
-                    s.session_id == session_id
-                        && (s.kind == "THRASHING" || s.kind == "DEAD_END")
+                    s.session_id == session_id && (s.kind == "THRASHING" || s.kind == "DEAD_END")
                 });
                 if has_negative {
                     let _ = annotations::decay_quality_for_node(conn, &sym.id.0, 0.9);
@@ -112,15 +111,16 @@ impl MemoryManager {
                  (id, anchor_type, anchor_value, text, tags, created_at, updated_at, stale,
                   kind, content_hash, quality, retrieval_count)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
-                rusqlite::params![id, at, av, text, tags, created, updated, stale, kind, hash, quality, retr],
+                rusqlite::params![
+                    id, at, av, text, tags, created, updated, stale, kind, hash, quality, retr
+                ],
             )?;
             count += 1;
         }
 
         // Fork annotation edges too
-        let mut edge_stmt = parent_conn.prepare(
-            "SELECT from_id, to_id, relation, weight, created_at FROM annotation_edges",
-        )?;
+        let mut edge_stmt = parent_conn
+            .prepare("SELECT from_id, to_id, relation, weight, created_at FROM annotation_edges")?;
         let edges = edge_stmt.query_map([], |row| {
             Ok((
                 row.get::<_, String>(0)?,
@@ -229,16 +229,18 @@ impl MemoryManager {
                      (id, anchor_type, anchor_value, text, tags, created_at, updated_at, stale,
                       kind, content_hash, quality, retrieval_count)
                      VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
-                    rusqlite::params![new_id, at, av, text, tags, created, updated, stale, kind, hash, quality, retr],
+                    rusqlite::params![
+                        new_id, at, av, text, tags, created, updated, stale, kind, hash, quality,
+                        retr
+                    ],
                 )?;
                 imported += 1;
             }
         }
 
         // Merge annotation edges
-        let mut edge_stmt = source_conn.prepare(
-            "SELECT from_id, to_id, relation, weight, created_at FROM annotation_edges",
-        )?;
+        let mut edge_stmt = source_conn
+            .prepare("SELECT from_id, to_id, relation, weight, created_at FROM annotation_edges")?;
         let edges = edge_stmt.query_map([], |row| {
             Ok((
                 row.get::<_, String>(0)?,
@@ -251,7 +253,12 @@ impl MemoryManager {
         for edge in edges {
             let (from_id, to_id, relation, weight, created) = edge?;
             let _ = crate::db::queries::upsert_annotation_edge(
-                target_conn, &from_id, &to_id, &relation, weight, created,
+                target_conn,
+                &from_id,
+                &to_id,
+                &relation,
+                weight,
+                created,
             );
         }
 
@@ -281,8 +288,17 @@ mod tests {
         let child = setup_db();
 
         crate::db::queries::insert_annotation(
-            &parent, "a1", Some("node"), Some("n1"), "note", None, "fact", Some("h1"), 1000,
-        ).unwrap();
+            &parent,
+            "a1",
+            Some("node"),
+            Some("n1"),
+            "note",
+            None,
+            "fact",
+            Some("h1"),
+            1000,
+        )
+        .unwrap();
 
         let count = MemoryManager::fork_annotations(&parent, &child).unwrap();
         assert_eq!(count, 1);
@@ -298,11 +314,29 @@ mod tests {
 
         let hash = annotations::compute_content_hash(Some("node"), Some("n1"), "same note");
         crate::db::queries::insert_annotation(
-            &source, "a1", Some("node"), Some("n1"), "same note", None, "fact", Some(&hash), 1000,
-        ).unwrap();
+            &source,
+            "a1",
+            Some("node"),
+            Some("n1"),
+            "same note",
+            None,
+            "fact",
+            Some(&hash),
+            1000,
+        )
+        .unwrap();
         crate::db::queries::insert_annotation(
-            &target, "a2", Some("node"), Some("n1"), "same note", None, "fact", Some(&hash), 1000,
-        ).unwrap();
+            &target,
+            "a2",
+            Some("node"),
+            Some("n1"),
+            "same note",
+            None,
+            "fact",
+            Some(&hash),
+            1000,
+        )
+        .unwrap();
 
         let result = MemoryManager::merge_annotations(&source, &target).unwrap();
         assert_eq!(result.deduped, 1);
@@ -321,11 +355,29 @@ mod tests {
         ).unwrap();
 
         crate::db::queries::insert_annotation(
-            &source, "a1", Some("node"), Some("n1"), "source note", None, "fact", Some("h1"), 1000,
-        ).unwrap();
+            &source,
+            "a1",
+            Some("node"),
+            Some("n1"),
+            "source note",
+            None,
+            "fact",
+            Some("h1"),
+            1000,
+        )
+        .unwrap();
         crate::db::queries::insert_annotation(
-            &target, "a2", Some("node"), Some("n1"), "target note", None, "fact", Some("h2"), 1000,
-        ).unwrap();
+            &target,
+            "a2",
+            Some("node"),
+            Some("n1"),
+            "target note",
+            None,
+            "fact",
+            Some("h2"),
+            1000,
+        )
+        .unwrap();
 
         let result = MemoryManager::merge_annotations(&source, &target).unwrap();
         assert_eq!(result.imported, 1);
@@ -341,11 +393,23 @@ mod tests {
         let target = setup_db();
 
         crate::db::queries::insert_annotation(
-            &source, "a1", Some("node"), Some("n_missing"), "orphan note", None, "fact", Some("h1"), 1000,
-        ).unwrap();
+            &source,
+            "a1",
+            Some("node"),
+            Some("n_missing"),
+            "orphan note",
+            None,
+            "fact",
+            Some("h1"),
+            1000,
+        )
+        .unwrap();
 
         let result = MemoryManager::merge_annotations(&source, &target).unwrap();
-        assert_eq!(result.imported, 0, "should skip annotations for missing nodes");
+        assert_eq!(
+            result.imported, 0,
+            "should skip annotations for missing nodes"
+        );
         assert_eq!(result.deduped, 0);
     }
 }

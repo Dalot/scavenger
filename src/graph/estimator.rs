@@ -2,11 +2,7 @@ use rusqlite::Connection;
 
 /// Estimate tokens that would be consumed WITHOUT the index (naive approach).
 /// Per-tool estimates based on raw_token_estimate from the files table.
-pub fn estimate_without_index(
-    conn: &Connection,
-    tool_name: &str,
-    file_path: Option<&str>,
-) -> u32 {
+pub fn estimate_without_index(conn: &Connection, tool_name: &str, file_path: Option<&str>) -> u32 {
     match tool_name {
         "get_capsule" => estimate_capsule_without_index(conn, file_path),
         "search_docs" => estimate_search_docs_without_index(conn),

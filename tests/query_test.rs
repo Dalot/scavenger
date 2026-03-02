@@ -6,7 +6,11 @@ use scavenger::query::intent::{self, Intent};
 fn test_debug_intent_keywords() {
     for keyword in ["fix", "bug", "error", "crash", "broken"] {
         let result = intent::classify(&format!("please {keyword} this"));
-        assert_eq!(result.primary, Intent::Debug, "'{keyword}' should trigger Debug");
+        assert_eq!(
+            result.primary,
+            Intent::Debug,
+            "'{keyword}' should trigger Debug"
+        );
     }
 }
 
@@ -14,7 +18,11 @@ fn test_debug_intent_keywords() {
 fn test_refactor_intent_keywords() {
     for keyword in ["refactor", "rename", "extract", "restructure"] {
         let result = intent::classify(&format!("{keyword} the module"));
-        assert_eq!(result.primary, Intent::Refactor, "'{keyword}' should trigger Refactor");
+        assert_eq!(
+            result.primary,
+            Intent::Refactor,
+            "'{keyword}' should trigger Refactor"
+        );
     }
 }
 
@@ -22,7 +30,11 @@ fn test_refactor_intent_keywords() {
 fn test_understand_intent_keywords() {
     for keyword in ["explain", "how does", "what does", "overview", "describe"] {
         let result = intent::classify(&format!("{keyword} this code"));
-        assert_eq!(result.primary, Intent::Understand, "'{keyword}' should trigger Understand");
+        assert_eq!(
+            result.primary,
+            Intent::Understand,
+            "'{keyword}' should trigger Understand"
+        );
     }
 }
 
@@ -30,7 +42,11 @@ fn test_understand_intent_keywords() {
 fn test_extend_intent_keywords() {
     for keyword in ["add", "implement", "create", "new feature"] {
         let result = intent::classify(&format!("{keyword} a handler"));
-        assert_eq!(result.primary, Intent::Extend, "'{keyword}' should trigger Extend");
+        assert_eq!(
+            result.primary,
+            Intent::Extend,
+            "'{keyword}' should trigger Extend"
+        );
     }
 }
 
@@ -38,7 +54,11 @@ fn test_extend_intent_keywords() {
 fn test_review_intent_keywords() {
     for keyword in ["review", "check", "audit", "inspect"] {
         let result = intent::classify(&format!("{keyword} the code"));
-        assert_eq!(result.primary, Intent::Review, "'{keyword}' should trigger Review");
+        assert_eq!(
+            result.primary,
+            Intent::Review,
+            "'{keyword}' should trigger Review"
+        );
     }
 }
 

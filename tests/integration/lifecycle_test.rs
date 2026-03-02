@@ -1,13 +1,13 @@
 // T067: Integration test — full lifecycle: init → index → capsule → edit → re-index → verify.
 
-use std::path::PathBuf;
 use rusqlite::Connection;
+use std::path::PathBuf;
 
+use scavenger::capsule;
 use scavenger::config::Config;
 use scavenger::db::{self, queries, schema};
-use scavenger::graph::{self, index, GraphState};
+use scavenger::graph::{self, GraphState, index};
 use scavenger::query;
-use scavenger::capsule;
 
 #[test]
 fn test_full_lifecycle() {
@@ -17,7 +17,11 @@ fn test_full_lifecycle() {
     // Create a source file
     let src_dir = root.join("src");
     std::fs::create_dir_all(&src_dir).unwrap();
-    std::fs::write(src_dir.join("lib.rs"), "fn hello() { world(); }\nfn world() {}").unwrap();
+    std::fs::write(
+        src_dir.join("lib.rs"),
+        "fn hello() { world(); }\nfn world() {}",
+    )
+    .unwrap();
 
     // Init: create DB and bulk index
     let scav_dir = root.join(".scavenger");
@@ -70,7 +74,8 @@ fn test_doc_indexing_lifecycle() {
     std::fs::write(
         root.join("README.md"),
         "# Test\n\n## Section A\n\nContent A\n\n## Section B\n\nContent B\n",
-    ).unwrap();
+    )
+    .unwrap();
 
     let conn = Connection::open_in_memory().unwrap();
     schema::ensure_branch_schema(&conn).unwrap();
@@ -80,7 +85,8 @@ fn test_doc_indexing_lifecycle() {
         &conn,
         &root.join("README.md").to_string_lossy(),
         &content,
-    ).unwrap();
+    )
+    .unwrap();
 
     assert!(chunks >= 1, "should index at least 1 doc chunk");
 }

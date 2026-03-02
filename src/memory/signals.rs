@@ -13,7 +13,15 @@ pub fn insert_signal(
     detail: Option<&str>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let now = now_secs();
-    queries::insert_behavioral_signal(conn, kind.as_str(), node_id, file_path, session_id, now, detail)?;
+    queries::insert_behavioral_signal(
+        conn,
+        kind.as_str(),
+        node_id,
+        file_path,
+        session_id,
+        now,
+        detail,
+    )?;
     Ok(())
 }
 
@@ -151,7 +159,15 @@ mod tests {
     #[test]
     fn test_insert_and_query_signal() {
         let conn = setup_db();
-        insert_signal(&conn, SignalKind::Thrashing, Some("n1"), None, "sess1", Some("3 edits in 5min")).unwrap();
+        insert_signal(
+            &conn,
+            SignalKind::Thrashing,
+            Some("n1"),
+            None,
+            "sess1",
+            Some("3 edits in 5min"),
+        )
+        .unwrap();
         let signals = signals_for_node(&conn, "n1", 10).unwrap();
         assert_eq!(signals.len(), 1);
         assert_eq!(signals[0].kind, "THRASHING");
@@ -169,7 +185,15 @@ mod tests {
     #[test]
     fn test_active_signal_count() {
         let conn = setup_db();
-        insert_signal(&conn, SignalKind::Thrashing, None, Some("/test.rs"), "s1", None).unwrap();
+        insert_signal(
+            &conn,
+            SignalKind::Thrashing,
+            None,
+            Some("/test.rs"),
+            "s1",
+            None,
+        )
+        .unwrap();
         let count = active_signal_count(&conn).unwrap();
         assert_eq!(count, 1);
     }
