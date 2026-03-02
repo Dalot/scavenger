@@ -36,7 +36,7 @@ tree-sitter-c-sharp = "0.23"
 tree-sitter-c = "0.24"
 tree-sitter-cpp = "0.23"
 tree-sitter-ruby = "0.23"
-tree-sitter-bash = "0.23"
+tree-sitter-bash = "0.25"
 # tree-sitter-kotlin 0.3.8 requires tree-sitter <0.23 — incompatible with our 0.25.
 # No compatible version exists as of 2026-03-01. Kotlin is a known unsupported language.
 # Re-evaluate when tree-sitter-kotlin releases a 0.4+ version.
