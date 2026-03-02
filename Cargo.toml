@@ -30,17 +30,17 @@ tree-sitter-rust = "0.24"
 tree-sitter-python = "0.23"
 tree-sitter-typescript = "0.23"
 tree-sitter-javascript = "0.23"
-tree-sitter-go = "0.23"
+tree-sitter-go = "0.25"
 tree-sitter-java = "0.23"
 tree-sitter-c-sharp = "0.23"
-tree-sitter-c = "0.23"
+tree-sitter-c = "0.24"
 tree-sitter-cpp = "0.23"
 tree-sitter-ruby = "0.23"
-tree-sitter-bash = "0.23"
+tree-sitter-bash = "0.25"
 # tree-sitter-kotlin 0.3.8 requires tree-sitter <0.23 — incompatible with our 0.25.
 # No compatible version exists as of 2026-03-01. Kotlin is a known unsupported language.
 # Re-evaluate when tree-sitter-kotlin releases a 0.4+ version.
-tree-sitter-php = "0.23"
+tree-sitter-php = "0.24"
 tree-sitter-swift = "0.7"
 
 # Graph
@@ -64,7 +64,7 @@ clap = { version = "4", features = ["derive"] }
 # Serialization
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-toml = "0.8"
+toml = "1.0"
 
 # Concurrency
 parking_lot = "0.12"
@@ -99,7 +99,7 @@ libc = "0.2.182"
 opentelemetry = { version = "0.27", optional = true }
 opentelemetry_sdk = { version = "0.27", features = ["rt-tokio"], optional = true }
 opentelemetry-otlp = { version = "0.27", features = ["tonic"], optional = true }
-tracing-opentelemetry = { version = "0.28", optional = true }
+tracing-opentelemetry = { version = "0.32", optional = true }
 
 [features]
 default = []

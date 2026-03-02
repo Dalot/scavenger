@@ -19,6 +19,49 @@ Got tired of watching people sell the same idea wrapped in marketing copy. Built
 - **Branch-aware index** — Each git branch gets its own SQLite database, so context always matches your current branch.
 - **Federated repos** *(work in progress)* — Query symbols from linked repositories as if they were local.
 
+## Benchmarks
+
+We ran an A/B comparison — same model (Claude 4.6 Opus), same 3-turn prompt sequence, same codebase (~4k lines Rust, 41 source files). One session had Scavenger enabled, one used only native tools (Grep, Read, Glob, Shell). Full methodology and turn-by-turn analysis: [`benchmark/report.md`](benchmark/report.md).
+
+### Session totals (3 turns)
+
+| Metric | Without Scavenger | With Scavenger | Delta |
+|--------|------------------:|---------------:|------:|
+| Total tool calls | 37 | 18 | **-51%** |
+| File reads | 13 | 7 | **-46%** |
+| Input tokens | 706.8k | 388.6k | **-45%** |
+| Output tokens | 12.4k | 3.4k | **-72%** |
+| Wall time | 238s | 86s | **-64%** |
+
+### How the savings compound
+
+The savings are not uniform across turns — they compound:
+
+| Turn | Task | Token delta | Tool call delta |
+|------|------|------------:|-----------:|
+| T1 | Explore a subsystem | +78% (investment) | +150% |
+| T2 | Analyze impact of a rename | +38% (narrowing) | 0% |
+| T3 | Execute the rename | **-68%** (payoff) | **-83%** |
+
+Turn 1 invests in structural understanding via capsules (signatures, call graphs, dependency neighborhoods). By Turn 3 the agent already knows the dependency structure and needs **88% fewer file reads**, **94% fewer output tokens**, and finishes in **17s vs 185s**.
+
+### When is Scavenger worth it?
+
+**Good fit:**
+- Multi-turn sessions (explore → analyze → modify → verify) — this is where the graph investment pays off
+- Medium-to-large codebases where re-navigation is expensive (the bigger the project, the more tokens wasted re-reading files)
+- Refactoring and impact analysis tasks — "what breaks if I change X?" is answered by the graph in milliseconds
+- Repeated work across sessions — annotations persist, so the agent doesn't start from zero next time
+
+**Not worth it:**
+- Single-shot questions ("what does this function do?") — capsules add overhead with no payback window
+- Tiny projects where the whole codebase fits in context anyway
+- Write-only tasks with no exploration phase (e.g. "add this exact function to this exact file")
+
+The break-even point in our benchmark was ~3 turns. If your session is shorter than that, you may not recoup the initial capsule investment.
+
+> **Note:** This is an N=1 benchmark on a single codebase. Results will vary by project size, prompt complexity, and model. We ran it to validate the approach, not to claim universal numbers. Run [`benchmark/benchmark.py`](benchmark/) on your own project to see your numbers.
+
 ## Supported Agents
 
 | Agent | Integration | Status |
