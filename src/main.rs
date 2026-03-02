@@ -426,9 +426,8 @@ fn cmd_init() -> Result<(), Box<dyn std::error::Error>> {
 
     eprintln!("\n{}", "Done!".green().bold());
     eprintln!(
-        "\n  {} {}",
+        "\n  {} claude --plugin-dir .scavenger/claude-plugin/",
         "Claude Code:".cyan().bold(),
-        "claude --plugin-dir .scavenger/claude-plugin/"
     );
     eprintln!(
         "  {} MCP tools + hooks registered in .cursor/ — works automatically.",
@@ -805,13 +804,12 @@ fn run_doctor_once(verbose: bool, format: &OutputFormat) -> Result<(), Box<dyn s
 
     // Daemon metrics (if available)
     let daemon_metrics = fetch_daemon_metrics(&scavenger_dir);
-    let mut latency_ok = true;
     if let Some(ref dm) = daemon_metrics {
         let p99 = dm
             .pointer("/capsule/latency_us/p99")
             .and_then(|v| v.as_u64())
             .unwrap_or(0);
-        latency_ok = p99 < 5_000_000; // 5 seconds
+        let latency_ok = p99 < 5_000_000;
         checks.push(DiagCheck::new(
             "Capsule P99 < 5s",
             "Performance",
@@ -867,8 +865,10 @@ fn run_doctor_once(verbose: bool, format: &OutputFormat) -> Result<(), Box<dyn s
             for c in &checks {
                 let icon = if c.passed {
                     if no_color { "[OK]" } else { "\u{2714}" }
+                } else if no_color {
+                    "[FAIL]"
                 } else {
-                    if no_color { "[FAIL]" } else { "\u{2718}" }
+                    "\u{2718}"
                 };
                 if no_color {
                     println!("  {icon} {}", c.name);
@@ -1824,13 +1824,9 @@ fn print_table(headers: &[&str], caps: &[usize], rows: &[Vec<String>]) {
         }
     }
 
-    // Apply caps (last column uncapped -- it's the tail)
+    // Apply caps
     for (i, w) in widths.iter_mut().enumerate() {
-        if i < ncols.saturating_sub(1) {
-            *w = (*w).min(caps.get(i).copied().unwrap_or(usize::MAX));
-        } else {
-            *w = (*w).min(caps.get(i).copied().unwrap_or(usize::MAX));
-        }
+        *w = (*w).min(caps.get(i).copied().unwrap_or(usize::MAX));
     }
 
     // Header
@@ -1847,12 +1843,12 @@ fn print_table(headers: &[&str], caps: &[usize], rows: &[Vec<String>]) {
     // Rows
     for row in rows {
         let mut line = String::new();
-        for i in 0..ncols {
+        for (i, w) in widths.iter().enumerate().take(ncols) {
             if i > 0 {
                 line.push_str("  ");
             }
             let val = row.get(i).map(|s| s.as_str()).unwrap_or("");
-            let w = widths[i];
+            let w = *w;
             if val.len() > w && w > 1 {
                 line.push_str(&val[..w - 1]);
                 line.push('…');

@@ -151,7 +151,7 @@ fn compute_proximity(item: &CandidateItem, target: Option<&NodeId>, ctx: &Scorin
 fn score_annotation(item: &CandidateItem, target: Option<&NodeId>, ctx: &ScoringContext) -> f64 {
     let bm25 = item.bm25_score.unwrap_or(0.5);
     let proximity = compute_proximity(item, target, ctx);
-    let recency = item.timestamp.map(|ts| recency_decay(ts)).unwrap_or(0.5);
+    let recency = item.timestamp.map(recency_decay).unwrap_or(0.5);
     let quality = item.quality.unwrap_or(0.5);
     let base = 0.4 * bm25 + 0.25 * proximity + 0.15 * recency + 0.2 * quality;
     let stale_penalty = if item.stale { 0.6 } else { 1.0 };
@@ -181,7 +181,7 @@ fn score_node_history(item: &CandidateItem) -> f64 {
 
 /// SessionActivity: 0.5 * recency + 0.5 * jaccard(activity_nodes, traversal_nodes)
 fn score_session_activity(item: &CandidateItem) -> f64 {
-    let recency = item.timestamp.map(|ts| recency_decay(ts)).unwrap_or(0.5);
+    let recency = item.timestamp.map(recency_decay).unwrap_or(0.5);
     // Jaccard computation would need traversal node set — approximate for now
     0.5 * recency + 0.5 * 0.3
 }

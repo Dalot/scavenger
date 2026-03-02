@@ -6,6 +6,7 @@ use crate::graph::types::{Confidence, EdgeKind, NodeKind};
 
 // ── Node CRUD ──
 
+#[allow(clippy::too_many_arguments)]
 pub fn upsert_node(
     conn: &Connection,
     id: &str,
@@ -151,6 +152,7 @@ pub fn get_file_last_indexed(conn: &Connection, file_path: &str) -> DbResult<Opt
 
 // ── Annotations CRUD ──
 
+#[allow(clippy::too_many_arguments)]
 pub fn insert_annotation(
     conn: &Connection,
     id: &str,
@@ -405,6 +407,7 @@ pub fn prune_old_sessions(conn: &Connection, cutoff_timestamp: i64) -> DbResult<
 
 // ── Doc Chunks ──
 
+#[allow(clippy::too_many_arguments)]
 pub fn upsert_doc_chunk(
     conn: &Connection,
     file_path: &str,
@@ -563,6 +566,7 @@ pub fn get_meta(conn: &Connection, key: &str) -> DbResult<Option<String>> {
 
 // ── Token Log ──
 
+#[allow(clippy::too_many_arguments)]
 pub fn insert_token_log(
     conn: &Connection,
     timestamp: i64,
@@ -627,6 +631,7 @@ pub fn load_all_nodes(conn: &Connection) -> DbResult<Vec<NodeRow>> {
 
 // ── Node Versions ──
 
+#[allow(clippy::too_many_arguments)]
 pub fn insert_node_version(
     conn: &Connection,
     symbol_hash: &str,

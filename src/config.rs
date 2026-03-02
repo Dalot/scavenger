@@ -10,7 +10,7 @@ pub enum ConfigError {
     Parse(#[from] toml::de::Error),
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize)]
 #[serde(default)]
 pub struct Config {
     pub budget: BudgetConfig,
@@ -100,29 +100,10 @@ impl Default for AnalyticsConfig {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize)]
 #[serde(default)]
 pub struct FederationConfig {
     pub repos: Vec<PathBuf>,
-}
-
-impl Default for FederationConfig {
-    fn default() -> Self {
-        Self { repos: Vec::new() }
-    }
-}
-
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            budget: BudgetConfig::default(),
-            scopes: std::collections::HashMap::new(),
-            traversal: TraversalConfig::default(),
-            docs: DocsConfig::default(),
-            analytics: AnalyticsConfig::default(),
-            federation: FederationConfig::default(),
-        }
-    }
 }
 
 impl Config {

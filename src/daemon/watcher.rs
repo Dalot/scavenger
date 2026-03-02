@@ -87,8 +87,7 @@ pub fn start_watcher(
                         if path.ends_with("index.lock") {
                             saw_git_index_lock = true;
                         }
-                        if path.ends_with("HEAD") || path.file_name().map_or(false, |n| n == "HEAD")
-                        {
+                        if path.ends_with("HEAD") || path.file_name().is_some_and(|n| n == "HEAD") {
                             saw_git_head = true;
                         }
                         continue;

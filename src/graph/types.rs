@@ -48,6 +48,7 @@ impl NodeKind {
         }
     }
 
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Option<Self> {
         match s {
             "Function" => Some(Self::Function),
@@ -95,6 +96,7 @@ impl EdgeKind {
         }
     }
 
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Option<Self> {
         match s {
             "Imports" => Some(Self::Imports),
@@ -132,6 +134,7 @@ impl Confidence {
         }
     }
 
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Option<Self> {
         match s {
             "precise" => Some(Self::Precise),

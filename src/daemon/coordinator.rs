@@ -126,7 +126,7 @@ impl ReindexCoordinator {
             .output()?;
 
         let parents = String::from_utf8_lossy(&output.stdout);
-        let parent_hashes: Vec<&str> = parents.trim().split_whitespace().collect();
+        let parent_hashes: Vec<&str> = parents.split_whitespace().collect();
 
         if parent_hashes.len() < 2 {
             return Ok(());
@@ -295,7 +295,6 @@ fn find_merged_branches(project_root: &std::path::Path) -> Vec<String> {
 
     let parent_hashes: Vec<String> = match parents_output {
         Ok(out) if out.status.success() => String::from_utf8_lossy(&out.stdout)
-            .trim()
             .split_whitespace()
             .map(|s| s.to_string())
             .collect(),

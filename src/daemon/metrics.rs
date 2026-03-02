@@ -67,6 +67,7 @@ impl Histogram {
 }
 
 /// Atomic counter.
+#[derive(Default)]
 pub struct Counter(AtomicU64);
 
 impl Counter {
@@ -164,7 +165,15 @@ impl DaemonMetrics {
             errors: Counter::new(),
         }
     }
+}
 
+impl Default for DaemonMetrics {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl DaemonMetrics {
     /// Serialize all metrics into a JSON snapshot.
     pub fn snapshot(&self, node_count: usize, edge_count: usize) -> Value {
         let uptime_secs = self.started_at.elapsed().as_secs();

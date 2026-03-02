@@ -169,8 +169,8 @@ pub fn session_effectiveness(
         "capsule_count": capsules.len(),
         "effectiveness_score": (avg_score * 100.0).round() / 100.0,
         "empty_capsules": empty_count,
-        "edit_hit_rate": if capsules.len() > 0 { (edit_hit_count as f64 / capsules.len() as f64 * 100.0).round() / 100.0 } else { 0.0 },
-        "fallback_rate": if capsules.len() > 0 { (fallback_count as f64 / capsules.len() as f64 * 100.0).round() / 100.0 } else { 0.0 },
+        "edit_hit_rate": if !capsules.is_empty() { (edit_hit_count as f64 / capsules.len() as f64 * 100.0).round() / 100.0 } else { 0.0 },
+        "fallback_rate": if !capsules.is_empty() { (fallback_count as f64 / capsules.len() as f64 * 100.0).round() / 100.0 } else { 0.0 },
         "capsules": capsule_details,
     })
 }

@@ -289,6 +289,7 @@ pub struct SessionSummary {
     pub status: Option<String>,
     pub session_duration_ms: Option<u64>,
     pub first_event: Option<String>,
+    #[allow(dead_code)]
     pub last_event: Option<String>,
     pub unique_files_read: Vec<String>,
 }
@@ -725,7 +726,7 @@ pub fn format_summary(s: &SessionSummary) -> String {
     ));
 
     if s.compaction_count > 0 {
-        out.push_str(&format!("\nContext window:\n"));
+        out.push_str("\nContext window:\n");
         out.push_str(&format!("  Compactions:        {}\n", s.compaction_count));
         if let Some(peak) = s.context_tokens_peak {
             out.push_str(&format!("  Peak context:       {} tokens\n", peak));

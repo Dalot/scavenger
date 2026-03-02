@@ -482,7 +482,7 @@ fn extract_call_edges(
         if child.kind() == "call_expression" || child.kind() == "call" {
             if let Some(func) = child.child_by_field_name("function") {
                 if let Ok(callee_name) = func.utf8_text(source) {
-                    let name = callee_name.split('.').last().unwrap_or(callee_name);
+                    let name = callee_name.split('.').next_back().unwrap_or(callee_name);
                     edges.push(ExtractedEdge {
                         from_id: from_id.clone(),
                         to_name: name.to_string(),
@@ -931,10 +931,10 @@ pub fn collect_source_files(root: &Path) -> Vec<PathBuf> {
         .build();
 
     for entry in walker.flatten() {
-        if entry.file_type().is_some_and(|ft| ft.is_file()) {
-            if detect_language(entry.path()).is_some() {
-                files.push(entry.into_path());
-            }
+        if entry.file_type().is_some_and(|ft| ft.is_file())
+            && detect_language(entry.path()).is_some()
+        {
+            files.push(entry.into_path());
         }
     }
     files

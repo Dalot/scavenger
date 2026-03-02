@@ -303,7 +303,7 @@ pub async fn run_daemon(project_root: PathBuf) -> Result<(), Box<dyn std::error:
     // Cleanup
     let _ = std::fs::remove_file(&pid_path);
     let _ = std::fs::remove_file(scavenger_dir.join("daemon.sock"));
-    let _ = lock_file.unlock();
+    drop(lock_file);
 
     tracing::info!("stopped cleanly");
     Ok(())

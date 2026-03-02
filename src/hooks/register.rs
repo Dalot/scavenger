@@ -503,7 +503,7 @@ struct LockGuard<'a>(&'a std::fs::File);
 
 impl Drop for LockGuard<'_> {
     fn drop(&mut self) {
-        let _ = self.0.unlock();
+        let _ = fs2::FileExt::unlock(self.0);
     }
 }
 

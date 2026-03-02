@@ -20,6 +20,7 @@ struct EditEntry {
 }
 
 /// Anti-pattern detector state. Lives in the daemon for the duration of a session.
+#[derive(Default)]
 pub struct AntiPatternDetector {
     fired: DeduplicationSet,
     thrashing_buffer: HashMap<String, VecDeque<EditEntry>>,
@@ -247,7 +248,7 @@ impl AntiPatternDetector {
                     Some(node_id),
                     None,
                     session_id,
-                    Some(&format!(">50 transitive dependents")),
+                    Some(">50 transitive dependents"),
                 );
             }
         }

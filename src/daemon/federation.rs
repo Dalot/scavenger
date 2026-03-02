@@ -9,6 +9,7 @@ use serde_json::{Value, json};
 use crate::db::queries;
 
 /// Manages connections to federated repositories.
+#[derive(Default)]
 pub struct FederationManager {
     connections: HashMap<PathBuf, FederatedRepo>,
     validation_cache: HashMap<PathBuf, (Instant, bool)>,

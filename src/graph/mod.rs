@@ -218,6 +218,12 @@ impl GraphState {
     }
 }
 
+impl Default for GraphState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

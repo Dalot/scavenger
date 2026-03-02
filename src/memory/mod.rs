@@ -14,6 +14,7 @@ use crate::graph::index::ExtractedSymbol;
 /// Layer 1: Node version history (versions.rs)
 /// Layer 2: Annotations with anchoring (annotations.rs)
 /// Layer 3: Behavioral signals + session activity (signals.rs, session.rs)
+#[derive(Default)]
 pub struct MemoryManager {
     #[allow(dead_code)]
     pub detector: antipattern::AntiPatternDetector,
