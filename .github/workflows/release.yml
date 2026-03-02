@@ -16,8 +16,22 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  ci:
+    name: CI Gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt -- --check
+      - run: cargo clippy -- -D warnings
+      - run: cargo test
+
   build:
     name: Build (${{ matrix.target }})
+    needs: ci
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
@@ -32,9 +46,6 @@ jobs:
           - target: aarch64-apple-darwin
             runner: macos-latest
             archive: scavenger-aarch64-macos.tar.gz
-          - target: x86_64-pc-windows-msvc
-            runner: windows-latest
-            archive: scavenger-x86_64-windows.zip
     steps:
       - uses: actions/checkout@v4
 
@@ -49,18 +60,11 @@ jobs:
       - name: Build
         run: cargo build --release --target ${{ matrix.target }}
 
-      - name: Package (Unix)
-        if: runner.os != 'Windows'
+      - name: Package
         run: |
           cd target/${{ matrix.target }}/release
           tar czf ../../../${{ matrix.archive }} scavenger
           cd ../../..
-
-      - name: Package (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          Compress-Archive -Path target/${{ matrix.target }}/release/scavenger.exe -DestinationPath ${{ matrix.archive }}
 
       - uses: actions/upload-artifact@v4
         with:
