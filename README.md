@@ -2,6 +2,7 @@
 
 [![CI](https://github.com/Dalot/scavenger/actions/workflows/ci.yml/badge.svg)](https://github.com/Dalot/scavenger/actions/workflows/ci.yml)
 [![crates.io](https://img.shields.io/crates/v/thescavenger.svg)](https://crates.io/crates/thescavenger)
+[![downloads](https://img.shields.io/crates/d/thescavenger.svg)](https://crates.io/crates/thescavenger)
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#license)
 [![MSRV: 1.85](https://img.shields.io/badge/rustc-1.85+-orange.svg)](https://blog.rust-lang.org/2025/02/20/Rust-1.85.0/)
 
@@ -13,20 +14,25 @@ Got tired of watching people sell the same idea wrapped in marketing copy. Built
 
 - **Fewer tokens, better context** — Instead of dumping entire files into the context window, Scavenger serves focused capsules: signatures, docstrings, call graphs, and dependency neighborhoods — only what the agent needs.
 - **Cross-session memory** — Annotations (facts, strategies, pitfalls) are anchored to symbols and persist across sessions. Your agent picks up where it left off. This still has a way to go, I am still testing it out.
-- **Simple setup** — Install with a single command, run `scavenger init`, and you're done. It registers hooks and MCP config for Claude Code and Cursor automatically. For other MCP-compatible tools, it writes a standard `.mcp.json` — though only Claude Code and Cursor have been tested end-to-end.
+- **Simple setup** — Install with a single command, run `scavenger init`, and you're done.
 - **Real dependency graph** — Built with tree-sitter over 15 languages. Answers "what calls X?", "what does X call?", and "what breaks if X changes?" in milliseconds, without grep.
 - **Branch-aware index** — Each git branch gets its own SQLite database, so context always matches your current branch.
-- **Federated repos** — Query symbols from linked repositories as if they were local.
+- **Federated repos** *(work in progress)* — Query symbols from linked repositories as if they were local.
 
 ## Supported Agents
 
 | Agent | Integration | Status |
 |-------|-------------|--------|
-| **Claude Code** | Native plugin hooks + MCP bridge | Tested — full `PreToolUse`/`PostToolUse`/`SessionStart`/`SessionEnd` hooks |
-| **Cursor** | Native hooks + MCP bridge | Tested — `sessionStart`, `sessionEnd`, `afterFileEdit` hooks + MCP tools |
-| **Other MCP tools** | MCP bridge via `.mcp.json` | Untested — should work with any tool that reads `.mcp.json`, but has not been verified. Feedback and reports welcome. |
+| **Claude Code** | Hooks + MCP bridge | Tested |
+| **Cursor** | Hooks + MCP bridge | Tested |
+| **Other MCP tools** | MCP bridge only | Untested — see below |
 
-> **Note:** Only Claude Code and Cursor have been tested end-to-end. The MCP bridge follows the standard protocol so other MCP-compatible tools (Windsurf, Continue, Amp, etc.) should work, but your mileage may vary. If you try Scavenger with another tool, please [open a discussion](https://github.com/Dalot/scavenger/discussions) and let us know how it went.
+Scavenger has two integration layers:
+
+1. **Hooks** — Automatically inject capsules on file reads, trigger re-indexing on writes, and manage daemon lifecycle. This is the full experience but requires the agent to support hooks. Currently only Claude Code and Cursor have hook support.
+2. **MCP bridge** — Exposes tools (`get_capsule`, `read_annotations`, etc.) that the agent calls explicitly. Any MCP-compatible agent can use this, but the agent won't automatically receive capsules or trigger re-indexing — it has to call the tools itself.
+
+Agents that only support MCP (Windsurf, Continue, Amp, etc.) get the MCP bridge but not hooks. The tools work, but the experience is less seamless. If you try Scavenger with another tool, please [open a discussion](https://github.com/Dalot/scavenger/discussions) and let us know how it went.
 
 ## Platform Support
 
@@ -35,7 +41,7 @@ Got tired of watching people sell the same idea wrapped in marketing copy. Built
 | Linux x86_64 | Supported (pre-built binary) |
 | macOS x86_64 | Supported (pre-built binary) |
 | macOS Apple Silicon | Supported (pre-built binary) |
-| Windows | Not supported — Scavenger relies on Unix domain sockets for daemon communication, which are not available on Windows. WSL2 should work but has not been tested. |
+| Windows | Not natively supported — Scavenger relies on Unix domain sockets for daemon communication. Use WSL2 instead. |
 
 ## Installation
 
@@ -103,7 +109,7 @@ After `scavenger init`, launch Claude Code with the plugin flag:
 claude --plugin-dir .scavenger/claude-plugin/
 ```
 
-This loads the hooks that inject capsules on `Read` and trigger re-indexing on `Write`/`Edit`/`MultiEdit`. If the `claude` CLI wasn't found during `init`, register the MCP bridge manually:
+If the `claude` CLI wasn't found during `init`, register the MCP bridge manually:
 
 ```bash
 claude mcp add scavenger -- scavenger mcp-bridge
@@ -111,52 +117,37 @@ claude mcp add scavenger -- scavenger mcp-bridge
 
 ### Cursor
 
-No extra steps after `scavenger init`. Cursor picks up `.cursor/mcp.json` and `.cursor/hooks.json` automatically. The MCP tools (`get_capsule`, `read_annotations`, etc.) are available in the agent panel.
+No extra steps after `scavenger init`. Cursor picks up `.cursor/mcp.json` and `.cursor/hooks.json` automatically.
 
-### Other MCP-compatible tools (Windsurf, Continue, Amp, etc.)
+### Other MCP-compatible tools
 
-> **Heads up:** These integrations have not been tested. They should work since the MCP bridge speaks the standard protocol, but expect rough edges. Feedback is very welcome.
-
-`scavenger init` writes a `.mcp.json` at the project root. Any tool that reads this standard config file will automatically discover the Scavenger MCP bridge.
-
-```json
-{
-  "mcpServers": {
-    "scavenger": {
-      "command": "scavenger",
-      "args": ["mcp-bridge"]
-    }
-  }
-}
-```
-
-If your tool doesn't read `.mcp.json` automatically, point it at `scavenger mcp-bridge` as the command for a stdio-based MCP server.
+`scavenger init` writes a `.mcp.json` at the project root. Any tool that reads this file will discover the MCP bridge. If your tool doesn't read `.mcp.json` automatically, point it at `scavenger mcp-bridge` as the command for a stdio-based MCP server.
 
 ## How It Works
 
-### Claude Code hooks
-- **PreToolUse (Read)** — Scavenger intercepts file reads and injects a capsule (signatures, docstrings, call graph neighborhood) as `additionalContext`, so Claude sees focused context instead of raw file content.
-- **PostToolUse (Write/Edit/MultiEdit)** — After writes, Scavenger incrementally re-indexes the changed file within a debounce window.
-- **SessionStart / SessionEnd** — Daemon is started/stopped automatically. A context decision tree is injected at session start to guide the agent toward graph tools.
+### Hooks (Claude Code & Cursor)
 
-### Cursor hooks
-- **afterFileEdit** — Triggers incremental re-index whenever a file is saved.
-- **sessionStart / sessionEnd** — Daemon lifecycle, identical to Claude Code.
+Hooks give agents the full Scavenger experience automatically:
+
+- **On file reads** — Injects a capsule (signatures, docstrings, call graph neighborhood) so the agent sees focused context instead of raw file content.
+- **On file writes** — Incrementally re-indexes the changed file within a debounce window.
+- **On session start/end** — Starts and stops the daemon automatically.
 
 ### MCP bridge tools
 
-Available in any MCP-connected agent as callable tools:
+Available in any MCP-connected agent as callable tools. Agents without hook support use these directly.
 
 | Tool | Description |
 |------|-------------|
-| `get_capsule` | Primary navigation tool. Pass a file path for focused context, or a symbol name to get callers, callees, and breakage impact. Replaces grep and raw file reads for structural questions. |
-| `read_annotations` | Retrieve persisted memory: facts, strategies, pitfalls anchored to symbols, files, or scopes. Supports FTS search and session summary. |
+| `get_capsule` | Pass a file path for focused context, or a symbol name to get callers, callees, and breakage impact. |
+| `read_annotations` | Retrieve persisted memory: facts, strategies, pitfalls anchored to symbols, files, or scopes. |
 | `write_annotation` | Persist a note anchored to a symbol, file, or scope. Survives across sessions and branches. |
 | `delete_annotation` | Remove an annotation by ID. |
-| `search_docs` | Semantic search over indexed markdown docs and code. |
+| `search_docs` | Search over indexed markdown docs and code. |
 
-### Session memory (3-layer model)
-1. **Annotations** — Explicit agent-written notes (facts, strategies, pitfalls, context), anchored to symbols.
+### Session memory
+
+1. **Annotations** — Agent-written notes (facts, strategies, pitfalls), anchored to symbols.
 2. **Behavioral signals** — Auto-captured metrics: which files were touched, token savings per session.
 3. **Version history** — Annotation edits are versioned; annotations from other branches can be merged.
 
@@ -182,7 +173,7 @@ Available in any MCP-connected agent as callable tools:
 | `scavenger db annotations [--limit N]` | List annotations |
 | `scavenger db tokens [--limit N]` | Show token_log entries |
 | `scavenger db query "SQL" [--meta]` | Run read-only SQL against the DB |
-| `scavenger federate add/remove/list/verify` | Manage federated repos |
+| `scavenger federate add/remove/list/verify` | Manage federated repos *(work in progress)* |
 | `scavenger clean [--purge]` | Remove plugin and legacy config (--purge removes all data) |
 
 ## Configuration
