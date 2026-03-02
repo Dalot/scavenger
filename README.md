@@ -54,6 +54,12 @@ After initialization, Scavenger automatically:
 | `scavenger merge-annotations <branch>` | Merge annotations from another branch |
 | `scavenger stats [--session] [--branch]` | Token savings report |
 | `scavenger doctor [--format=json]` | Health diagnostics |
+| `scavenger db summary` | Node/edge/file/annotation counts, DB sizes |
+| `scavenger db nodes [--limit N]` | List indexed symbols |
+| `scavenger db files [--limit N]` | List indexed files |
+| `scavenger db annotations [--limit N]` | List annotations |
+| `scavenger db tokens [--limit N]` | Show token_log entries |
+| `scavenger db query "SQL" [--meta]` | Run read-only SQL against the DB |
 | `scavenger federate add/remove/list/verify` | Manage federated repos |
 
 ## Configuration

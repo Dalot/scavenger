@@ -55,6 +55,18 @@ impl MemoryManager {
                 action_count: 0,
             };
             self.detector.check_all(conn, graph, session_id, &context);
+
+            // Quality decay: if THRASHING or DEAD_END signals exist for this node
+            // in the current session, decay annotation quality
+            if let Ok(sigs) = signals::signals_for_node(conn, &sym.id.0, 5) {
+                let has_negative = sigs.iter().any(|s| {
+                    s.session_id == session_id
+                        && (s.kind == "THRASHING" || s.kind == "DEAD_END")
+                });
+                if has_negative {
+                    let _ = annotations::decay_quality_for_node(conn, &sym.id.0, 0.9);
+                }
+            }
         }
     }
 
@@ -71,7 +83,8 @@ impl MemoryManager {
         child_conn: &Connection,
     ) -> Result<u64, Box<dyn std::error::Error>> {
         let mut stmt = parent_conn.prepare(
-            "SELECT id, anchor_type, anchor_value, text, tags, created_at, updated_at, stale
+            "SELECT id, anchor_type, anchor_value, text, tags, created_at, updated_at, stale,
+                    kind, content_hash, quality, retrieval_count
              FROM annotations",
         )?;
         let rows = stmt.query_map([], |row| {
@@ -84,31 +97,60 @@ impl MemoryManager {
                 row.get::<_, i64>(5)?,
                 row.get::<_, i64>(6)?,
                 row.get::<_, bool>(7)?,
+                row.get::<_, String>(8)?,
+                row.get::<_, Option<String>>(9)?,
+                row.get::<_, f64>(10)?,
+                row.get::<_, i64>(11)?,
             ))
         })?;
 
         let mut count = 0u64;
         for row in rows {
-            let (id, at, av, text, tags, created, updated, stale) = row?;
+            let (id, at, av, text, tags, created, updated, stale, kind, hash, quality, retr) = row?;
             child_conn.execute(
                 "INSERT OR IGNORE INTO annotations
-                 (id, anchor_type, anchor_value, text, tags, created_at, updated_at, stale)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-                rusqlite::params![id, at, av, text, tags, created, updated, stale],
+                 (id, anchor_type, anchor_value, text, tags, created_at, updated_at, stale,
+                  kind, content_hash, quality, retrieval_count)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+                rusqlite::params![id, at, av, text, tags, created, updated, stale, kind, hash, quality, retr],
             )?;
             count += 1;
         }
+
+        // Fork annotation edges too
+        let mut edge_stmt = parent_conn.prepare(
+            "SELECT from_id, to_id, relation, weight, created_at FROM annotation_edges",
+        )?;
+        let edges = edge_stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, f64>(3)?,
+                row.get::<_, i64>(4)?,
+            ))
+        })?;
+        for edge in edges {
+            let (from_id, to_id, relation, weight, created) = edge?;
+            let _ = child_conn.execute(
+                "INSERT OR IGNORE INTO annotation_edges (from_id, to_id, relation, weight, created_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
+                rusqlite::params![from_id, to_id, relation, weight, created],
+            );
+        }
+
         Ok(count)
     }
 
     /// Union-merge annotations from a source branch into the target.
-    /// Same anchor+text = dedup, different text = keep both.
+    /// Content-hash dedup when available, fallback to anchor+text check.
     pub fn merge_annotations(
         source_conn: &Connection,
         target_conn: &Connection,
     ) -> Result<MergeResult, Box<dyn std::error::Error>> {
         let mut stmt = source_conn.prepare(
-            "SELECT id, anchor_type, anchor_value, text, tags, created_at, updated_at, stale
+            "SELECT id, anchor_type, anchor_value, text, tags, created_at, updated_at, stale,
+                    kind, content_hash, quality, retrieval_count
              FROM annotations",
         )?;
         let rows = stmt.query_map([], |row| {
@@ -121,6 +163,10 @@ impl MemoryManager {
                 row.get::<_, i64>(5)?,
                 row.get::<_, i64>(6)?,
                 row.get::<_, bool>(7)?,
+                row.get::<_, String>(8)?,
+                row.get::<_, Option<String>>(9)?,
+                row.get::<_, f64>(10)?,
+                row.get::<_, i64>(11)?,
             ))
         })?;
 
@@ -128,23 +174,28 @@ impl MemoryManager {
         let mut deduped = 0u64;
 
         for row in rows {
-            let (id, at, av, text, tags, created, updated, stale) = row?;
+            let (id, at, av, text, tags, created, updated, stale, kind, hash, quality, retr) = row?;
 
-            // Check for duplicate (same anchor + text)
-            let exists: bool = target_conn
-                .query_row(
-                    "SELECT COUNT(*) FROM annotations
-                     WHERE anchor_type IS ?1 AND anchor_value IS ?2 AND text = ?3",
-                    rusqlite::params![at, av, text],
-                    |row| row.get::<_, i64>(0).map(|c| c > 0),
-                )
-                .unwrap_or(false);
+            // Dedup: prefer content_hash when available, fallback to anchor+text
+            let exists = if let Some(ref h) = hash {
+                crate::db::queries::find_annotation_by_content_hash(target_conn, h)
+                    .ok()
+                    .flatten()
+                    .is_some()
+            } else {
+                target_conn
+                    .query_row(
+                        "SELECT COUNT(*) FROM annotations
+                         WHERE anchor_type IS ?1 AND anchor_value IS ?2 AND text = ?3",
+                        rusqlite::params![at, av, text],
+                        |row| row.get::<_, i64>(0).map(|c| c > 0),
+                    )
+                    .unwrap_or(false)
+            };
 
             if exists {
-                // Rule 1: same anchor + same text → skip
                 deduped += 1;
             } else {
-                // Rule 3: only import node-anchored annotations if the NodeId exists in target
                 if at.as_deref() == Some("node") {
                     if let Some(ref node_id) = av {
                         let node_exists: bool = target_conn
@@ -160,7 +211,6 @@ impl MemoryManager {
                     }
                 }
 
-                // Rule 2: same anchor + different text → keep both (new ID if clash)
                 let new_id = if target_conn
                     .query_row(
                         "SELECT COUNT(*) FROM annotations WHERE id = ?1",
@@ -176,12 +226,33 @@ impl MemoryManager {
 
                 target_conn.execute(
                     "INSERT INTO annotations
-                     (id, anchor_type, anchor_value, text, tags, created_at, updated_at, stale)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-                    rusqlite::params![new_id, at, av, text, tags, created, updated, stale],
+                     (id, anchor_type, anchor_value, text, tags, created_at, updated_at, stale,
+                      kind, content_hash, quality, retrieval_count)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+                    rusqlite::params![new_id, at, av, text, tags, created, updated, stale, kind, hash, quality, retr],
                 )?;
                 imported += 1;
             }
+        }
+
+        // Merge annotation edges
+        let mut edge_stmt = source_conn.prepare(
+            "SELECT from_id, to_id, relation, weight, created_at FROM annotation_edges",
+        )?;
+        let edges = edge_stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, f64>(3)?,
+                row.get::<_, i64>(4)?,
+            ))
+        })?;
+        for edge in edges {
+            let (from_id, to_id, relation, weight, created) = edge?;
+            let _ = crate::db::queries::upsert_annotation_edge(
+                target_conn, &from_id, &to_id, &relation, weight, created,
+            );
         }
 
         Ok(MergeResult { imported, deduped })
@@ -210,7 +281,7 @@ mod tests {
         let child = setup_db();
 
         crate::db::queries::insert_annotation(
-            &parent, "a1", Some("node"), Some("n1"), "note", None, 1000,
+            &parent, "a1", Some("node"), Some("n1"), "note", None, "fact", Some("h1"), 1000,
         ).unwrap();
 
         let count = MemoryManager::fork_annotations(&parent, &child).unwrap();
@@ -225,11 +296,12 @@ mod tests {
         let source = setup_db();
         let target = setup_db();
 
+        let hash = annotations::compute_content_hash(Some("node"), Some("n1"), "same note");
         crate::db::queries::insert_annotation(
-            &source, "a1", Some("node"), Some("n1"), "same note", None, 1000,
+            &source, "a1", Some("node"), Some("n1"), "same note", None, "fact", Some(&hash), 1000,
         ).unwrap();
         crate::db::queries::insert_annotation(
-            &target, "a2", Some("node"), Some("n1"), "same note", None, 1000,
+            &target, "a2", Some("node"), Some("n1"), "same note", None, "fact", Some(&hash), 1000,
         ).unwrap();
 
         let result = MemoryManager::merge_annotations(&source, &target).unwrap();
@@ -242,7 +314,6 @@ mod tests {
         let source = setup_db();
         let target = setup_db();
 
-        // Node must exist in target for Rule 3 (node-anchored annotations import only if NodeId exists)
         target.execute(
             "INSERT INTO nodes (id, kind, name, file_path, line_start, line_end, signature, signature_hash, skeleton, checksum)
              VALUES ('n1', 'Function', 'hello', 'src/lib.rs', 1, 5, 'fn hello()', 'aabb0011', 'fn hello()', X'CAFE')",
@@ -250,10 +321,10 @@ mod tests {
         ).unwrap();
 
         crate::db::queries::insert_annotation(
-            &source, "a1", Some("node"), Some("n1"), "source note", None, 1000,
+            &source, "a1", Some("node"), Some("n1"), "source note", None, "fact", Some("h1"), 1000,
         ).unwrap();
         crate::db::queries::insert_annotation(
-            &target, "a2", Some("node"), Some("n1"), "target note", None, 1000,
+            &target, "a2", Some("node"), Some("n1"), "target note", None, "fact", Some("h2"), 1000,
         ).unwrap();
 
         let result = MemoryManager::merge_annotations(&source, &target).unwrap();
@@ -269,9 +340,8 @@ mod tests {
         let source = setup_db();
         let target = setup_db();
 
-        // Source has an annotation for "n_missing" which does NOT exist in target's nodes table
         crate::db::queries::insert_annotation(
-            &source, "a1", Some("node"), Some("n_missing"), "orphan note", None, 1000,
+            &source, "a1", Some("node"), Some("n_missing"), "orphan note", None, "fact", Some("h1"), 1000,
         ).unwrap();
 
         let result = MemoryManager::merge_annotations(&source, &target).unwrap();

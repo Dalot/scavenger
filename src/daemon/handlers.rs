@@ -38,7 +38,13 @@ pub async fn dispatch(state: &Arc<DaemonState>, request: Value) -> Value {
         "annotation_write" => handle_annotation_write(state, &request).await,
         "annotation_delete" => handle_annotation_delete(state, &request).await,
         "search_docs" => handle_search_docs(state, &request).await,
-        _ => json!({ "error": format!("unknown method: {method}") }),
+        _ => {
+            super::daemon_log(&state.scavenger_dir, "error", &json!({
+                "handler": "dispatch",
+                "error": format!("unknown method: {method}"),
+            }));
+            json!({ "error": format!("unknown method: {method}") })
+        }
     }
 }
 
@@ -69,12 +75,23 @@ async fn handle_capsule(state: &Arc<DaemonState>, request: &Value) -> Value {
 
     let conn_guard = state.branch_db.lock();
     let Some(ref conn) = *conn_guard else {
+        super::daemon_log(&state.scavenger_dir, "capsule", &json!({
+            "file": file, "status": "no_db",
+        }));
         return json!({ "capsule": "", "token_count": 0 });
     };
 
     let query_result = query::run_query(conn, &graph, &state.config, file, symbol, query_str);
 
     let result = capsule::assemble(conn, &graph, &state.config, &query_result, budget);
+
+    super::daemon_log(&state.scavenger_dir, "capsule", &json!({
+        "file": file,
+        "symbol": symbol,
+        "intent": format!("{:?}", query_result.intent.primary),
+        "tokens": result.token_count,
+        "items": result.items_included,
+    }));
 
     // Token logging
     let estimated = crate::graph::estimator::estimate_without_index(conn, "get_capsule", Some(file));
@@ -109,7 +126,6 @@ async fn handle_capsule(state: &Arc<DaemonState>, request: &Value) -> Value {
 }
 
 async fn handle_hook_pre(state: &Arc<DaemonState>, request: &Value) -> Value {
-    // PreToolUse (Read): generate capsule as additional context
     let file = request.get("file").and_then(|v| v.as_str()).unwrap_or("");
     if file.is_empty() {
         return json!({});
@@ -121,11 +137,18 @@ async fn handle_hook_pre(state: &Arc<DaemonState>, request: &Value) -> Value {
     });
     let result = handle_capsule(state, &capsule_req).await;
     let capsule_text = result.get("capsule").and_then(|v| v.as_str()).unwrap_or("");
+    let injected = !capsule_text.is_empty();
 
-    if capsule_text.is_empty() {
-        json!({})
-    } else {
+    super::daemon_log(&state.scavenger_dir, "hook_pre", &json!({
+        "file": file,
+        "injected": injected,
+        "tokens": result.get("token_count").and_then(|v| v.as_u64()).unwrap_or(0),
+    }));
+
+    if injected {
         json!({ "additionalContext": capsule_text })
+    } else {
+        json!({})
     }
 }
 
@@ -137,25 +160,30 @@ async fn handle_hook_post(state: &Arc<DaemonState>, request: &Value) -> Value {
             .unwrap_or_default()
             .as_secs() as i64;
 
-        // Log session event
         if let Some(ref conn) = *state.branch_db.lock() {
             let _ = queries::insert_session_event(conn, &session, "edit", Some(file), None, now);
         }
 
-        // Trigger immediate incremental re-index (Phase 1: prep without lock)
         let prep = {
             let db_guard = state.branch_db.lock();
             let Some(ref conn) = *db_guard else {
+                super::daemon_log(&state.scavenger_dir, "hook_post", &json!({
+                    "file": file, "status": "no_db",
+                }));
                 return json!({});
             };
             let graph = state.graph.read();
             match crate::graph::index::incremental_reindex_prep(conn, &graph, file) {
                 Ok(p) => p,
-                Err(_) => return json!({}),
+                Err(e) => {
+                    super::daemon_log(&state.scavenger_dir, "hook_post", &json!({
+                        "file": file, "status": "error", "error": e.to_string(),
+                    }));
+                    return json!({});
+                }
             }
         };
 
-        // Phase 2: swap under write lock
         {
             let db_guard = state.branch_db.lock();
             if let Some(ref conn) = *db_guard {
@@ -165,6 +193,10 @@ async fn handle_hook_post(state: &Arc<DaemonState>, request: &Value) -> Value {
                 let _ = graph.save_centrality(conn);
             }
         }
+
+        super::daemon_log(&state.scavenger_dir, "hook_post", &json!({
+            "file": file, "status": "reindexed",
+        }));
     }
     json!({})
 }
@@ -270,6 +302,8 @@ async fn handle_annotation_read(state: &Arc<DaemonState>, request: &Value) -> Va
                             "text": r.text,
                             "tags": r.tags,
                             "stale": r.stale,
+                            "kind": r.kind,
+                            "quality": r.quality,
                         })
                     })
                     .collect();
@@ -357,15 +391,28 @@ async fn handle_annotation_write(state: &Arc<DaemonState>, request: &Value) -> V
     let at_str = anchor_type.as_deref();
     let av_str = anchor_value.as_deref();
 
-    match crate::memory::annotations::upsert_annotation(conn, &id, at_str.and_then(crate::memory::annotations::AnchorType::from_str), av_str, text, tags) {
-        Ok(()) => {
-            let mut response = json!({ "id": id, "status": "created" });
+    let kind_str = request.get("kind").and_then(|v| v.as_str()).unwrap_or("fact");
+    let kind = crate::memory::annotations::AnnotationKind::from_str(kind_str);
+
+    match crate::memory::annotations::upsert_annotation(conn, &id, at_str.and_then(crate::memory::annotations::AnchorType::from_str), av_str, text, tags, kind) {
+        Ok(result) => {
+            let status = if result.deduplicated { "deduplicated" } else { "created" };
+            super::daemon_log(&state.scavenger_dir, "annotation_write", &json!({
+                "id": result.id, "status": status, "kind": kind_str,
+                "anchor_type": at_str, "anchor_value": av_str,
+            }));
+            let mut response = json!({ "id": result.id, "status": status, "kind": kind_str });
             if let Some(n) = note {
                 response["note"] = json!(n);
             }
             response
         }
-        Err(e) => json!({ "error": e.to_string() }),
+        Err(e) => {
+            super::daemon_log(&state.scavenger_dir, "annotation_write", &json!({
+                "status": "error", "error": e.to_string(),
+            }));
+            json!({ "error": e.to_string() })
+        }
     }
 }
 
@@ -380,11 +427,16 @@ async fn handle_annotation_delete(state: &Arc<DaemonState>, request: &Value) -> 
         return json!({ "error": "no database" });
     };
 
-    match conn.execute("DELETE FROM annotations WHERE id = ?1", rusqlite::params![id]) {
+    let result = match conn.execute("DELETE FROM annotations WHERE id = ?1", rusqlite::params![id]) {
         Ok(0) => json!({ "error": "not found" }),
         Ok(_) => json!({ "status": "deleted" }),
         Err(e) => json!({ "error": e.to_string() }),
-    }
+    };
+    super::daemon_log(&state.scavenger_dir, "annotation_delete", &json!({
+        "id": id,
+        "status": result.get("status").or_else(|| result.get("error")),
+    }));
+    result
 }
 
 async fn handle_search_docs(state: &Arc<DaemonState>, request: &Value) -> Value {
@@ -405,6 +457,9 @@ async fn handle_search_docs(state: &Arc<DaemonState>, request: &Value) -> Value 
 
     match queries::search_doc_chunks_fts(conn, query, limit) {
         Ok(matches) => {
+            super::daemon_log(&state.scavenger_dir, "search_docs", &json!({
+                "query": query, "results": matches.len(),
+            }));
             let results: Vec<Value> = matches
                 .iter()
                 .map(|m| {
@@ -420,6 +475,11 @@ async fn handle_search_docs(state: &Arc<DaemonState>, request: &Value) -> Value 
                 .collect();
             json!({ "results": results })
         }
-        Err(_) => json!({ "results": [] }),
+        Err(e) => {
+            super::daemon_log(&state.scavenger_dir, "search_docs", &json!({
+                "query": query, "status": "error", "error": e.to_string(),
+            }));
+            json!({ "results": [] })
+        }
     }
 }

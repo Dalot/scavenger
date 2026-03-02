@@ -55,6 +55,12 @@ pub struct CandidateItem {
     pub bm25_score: Option<f64>,
     /// For annotations/session: creation/update timestamp (epoch seconds)
     pub timestamp: Option<i64>,
+    /// For annotations: kind ('fact', 'strategy', 'pitfall', 'context')
+    pub annotation_kind: Option<String>,
+    /// For annotations: quality score [0.0, 1.0]
+    pub quality: Option<f64>,
+    /// For annotations: the annotation ID (for retrieval count bumping and edge following)
+    pub annotation_id: Option<String>,
 }
 
 #[derive(Debug)]
@@ -108,6 +114,16 @@ pub fn assemble(
 
     // Stage 4: TRIM
     render::trim(&mut candidates, effective_budget);
+
+    // Bump retrieval_count for annotations that survived trimming
+    let annotation_ids: Vec<String> = candidates
+        .iter()
+        .filter(|c| c.source == CandidateSource::Annotation)
+        .filter_map(|c| c.annotation_id.clone())
+        .collect();
+    if !annotation_ids.is_empty() {
+        let _ = crate::db::queries::increment_retrieval_count(conn, &annotation_ids);
+    }
 
     let items_included = candidates.len();
 

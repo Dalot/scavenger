@@ -50,6 +50,8 @@ pub struct WriteAnnotationParams {
     pub file: Option<String>,
     /// Scope name to anchor to (e.g. 'auth', 'api').
     pub scope: Option<String>,
+    /// Annotation kind: 'fact' (default), 'strategy', 'pitfall', 'context'.
+    pub kind: Option<String>,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -169,6 +171,9 @@ impl ScavengerBridge {
         }
         if let Some(t) = &p.tags {
             req["tags"] = json!(t);
+        }
+        if let Some(k) = &p.kind {
+            req["kind"] = json!(k);
         }
         if let Some(s) = &p.symbol {
             req["anchor_type"] = json!("node");

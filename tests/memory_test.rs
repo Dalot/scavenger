@@ -37,7 +37,7 @@ fn test_annotation_create_read_update_delete() {
     annotations::upsert_annotation(
         &conn, "a1",
         Some(annotations::AnchorType::Node), Some("n1"),
-        "first version", None,
+        "first version", None, annotations::AnnotationKind::Fact,
     ).unwrap();
 
     let anns = annotations::read_by_anchor(&conn, "node", "n1").unwrap();
@@ -47,7 +47,7 @@ fn test_annotation_create_read_update_delete() {
     annotations::upsert_annotation(
         &conn, "a1",
         Some(annotations::AnchorType::Node), Some("n1"),
-        "updated version", Some("important"),
+        "updated version", Some("important"), annotations::AnnotationKind::Fact,
     ).unwrap();
 
     let anns = annotations::read_by_anchor(&conn, "node", "n1").unwrap();
@@ -63,9 +63,9 @@ fn test_annotation_create_read_update_delete() {
 fn test_annotation_anchor_types() {
     let conn = setup();
 
-    annotations::upsert_annotation(&conn, "f1", Some(annotations::AnchorType::File), Some("/test.rs"), "file note", None).unwrap();
-    annotations::upsert_annotation(&conn, "s1", Some(annotations::AnchorType::Scope), Some("auth"), "scope note", None).unwrap();
-    annotations::upsert_annotation(&conn, "p1", Some(annotations::AnchorType::Project), None, "project note", None).unwrap();
+    annotations::upsert_annotation(&conn, "f1", Some(annotations::AnchorType::File), Some("/test.rs"), "file note", None, annotations::AnnotationKind::Fact).unwrap();
+    annotations::upsert_annotation(&conn, "s1", Some(annotations::AnchorType::Scope), Some("auth"), "scope note", None, annotations::AnnotationKind::Strategy).unwrap();
+    annotations::upsert_annotation(&conn, "p1", Some(annotations::AnchorType::Project), None, "project note", None, annotations::AnnotationKind::Context).unwrap();
 
     assert_eq!(annotations::read_by_anchor(&conn, "file", "/test.rs").unwrap().len(), 1);
     assert_eq!(annotations::read_by_anchor(&conn, "scope", "auth").unwrap().len(), 1);

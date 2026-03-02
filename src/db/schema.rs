@@ -1,12 +1,12 @@
 use super::{DbError, DbResult};
 use rusqlite::Connection;
 
-pub const KNOWN_MAX_VERSION: u32 = 1;
+pub const KNOWN_MAX_VERSION: u32 = 2;
 
 /// Ensure the per-branch index database has all required tables, FTS5 virtual
 /// tables, triggers, and indexes. Uses PRAGMA user_version for migration tracking.
 pub fn ensure_branch_schema(conn: &Connection) -> DbResult<()> {
-    let current: u32 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
+    let mut current: u32 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
 
     if current > KNOWN_MAX_VERSION {
         return Err(DbError::VersionTooNew {
@@ -18,6 +18,12 @@ pub fn ensure_branch_schema(conn: &Connection) -> DbResult<()> {
     if current == 0 {
         create_branch_schema_v1(conn)?;
         conn.pragma_update(None, "user_version", 1)?;
+        current = 1;
+    }
+
+    if current == 1 {
+        migrate_v1_to_v2(conn)?;
+        conn.pragma_update(None, "user_version", 2)?;
     }
 
     Ok(())
@@ -25,7 +31,7 @@ pub fn ensure_branch_schema(conn: &Connection) -> DbResult<()> {
 
 /// Ensure the shared daemon_meta database has all required tables.
 pub fn ensure_daemon_meta_schema(conn: &Connection) -> DbResult<()> {
-    let current: u32 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
+    let mut current: u32 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
 
     if current > KNOWN_MAX_VERSION {
         return Err(DbError::VersionTooNew {
@@ -37,13 +43,22 @@ pub fn ensure_daemon_meta_schema(conn: &Connection) -> DbResult<()> {
     if current == 0 {
         create_daemon_meta_schema_v1(conn)?;
         conn.pragma_update(None, "user_version", 1)?;
+        current = 1;
     }
+
+    // daemon_meta has no V2 changes yet, but the pattern is in place
+    let _ = current;
 
     Ok(())
 }
 
 fn create_branch_schema_v1(conn: &Connection) -> DbResult<()> {
     conn.execute_batch(BRANCH_SCHEMA_V1)?;
+    Ok(())
+}
+
+fn migrate_v1_to_v2(conn: &Connection) -> DbResult<()> {
+    conn.execute_batch(BRANCH_MIGRATION_V1_TO_V2)?;
     Ok(())
 }
 
@@ -244,6 +259,36 @@ CREATE TRIGGER IF NOT EXISTS doc_chunks_au AFTER UPDATE ON doc_chunks BEGIN
 END;
 "#;
 
+const BRANCH_MIGRATION_V1_TO_V2: &str = r#"
+-- ALMA-inspired annotation improvements (Items 1-5)
+
+-- Item 1: Structured annotation kinds
+ALTER TABLE annotations ADD COLUMN kind TEXT DEFAULT 'fact';
+
+-- Item 3: Content-hash deduplication
+ALTER TABLE annotations ADD COLUMN content_hash TEXT;
+
+-- Item 2: Feedback-driven quality scoring
+ALTER TABLE annotations ADD COLUMN quality REAL DEFAULT 0.5;
+ALTER TABLE annotations ADD COLUMN retrieval_count INTEGER DEFAULT 0;
+
+CREATE INDEX IF NOT EXISTS idx_annotations_content_hash
+    ON annotations(content_hash);
+
+-- Item 5: Cross-annotation relationship edges (schema only)
+CREATE TABLE IF NOT EXISTS annotation_edges (
+    from_id    TEXT NOT NULL REFERENCES annotations(id),
+    to_id      TEXT NOT NULL REFERENCES annotations(id),
+    relation   TEXT NOT NULL,
+    weight     REAL DEFAULT 1.0,
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY (from_id, to_id, relation)
+);
+
+CREATE INDEX IF NOT EXISTS idx_annotation_edges_to
+    ON annotation_edges(to_id);
+"#;
+
 const DAEMON_META_SCHEMA_V1: &str = r#"
 -- daemon_meta key-value store
 CREATE TABLE IF NOT EXISTS daemon_meta (
@@ -333,7 +378,7 @@ mod tests {
         let ver: u32 = conn
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .unwrap();
-        assert_eq!(ver, 1);
+        assert_eq!(ver, 2);
     }
 
     #[test]
@@ -369,6 +414,70 @@ mod tests {
         assert!(tables.contains(&"daemon_meta".to_string()));
         assert!(tables.contains(&"federated_repos".to_string()));
         assert!(tables.contains(&"token_log".to_string()));
+    }
+
+    #[test]
+    fn test_v2_migration_adds_annotation_columns() {
+        let conn = Connection::open_in_memory().unwrap();
+        ensure_branch_schema(&conn).unwrap();
+
+        conn.execute(
+            "INSERT INTO annotations (id, anchor_type, anchor_value, text, kind, content_hash, quality, retrieval_count, created_at, updated_at)
+             VALUES ('a1', 'node', 'n1', 'test', 'pitfall', 'abc123', 0.8, 3, 1000, 1000)",
+            [],
+        ).unwrap();
+
+        let (kind, hash, quality, count): (String, Option<String>, f64, i64) = conn.query_row(
+            "SELECT kind, content_hash, quality, retrieval_count FROM annotations WHERE id = 'a1'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        ).unwrap();
+
+        assert_eq!(kind, "pitfall");
+        assert_eq!(hash.as_deref(), Some("abc123"));
+        assert!((quality - 0.8).abs() < f64::EPSILON);
+        assert_eq!(count, 3);
+    }
+
+    #[test]
+    fn test_v2_migration_creates_annotation_edges_table() {
+        let conn = Connection::open_in_memory().unwrap();
+        ensure_branch_schema(&conn).unwrap();
+
+        let tables: Vec<String> = conn
+            .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name = 'annotation_edges'")
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(tables.len(), 1);
+    }
+
+    #[test]
+    fn test_v2_migration_from_existing_v1() {
+        let conn = Connection::open_in_memory().unwrap();
+
+        // Simulate a V1 database with pre-existing annotations
+        create_branch_schema_v1(&conn).unwrap();
+        conn.pragma_update(None, "user_version", 1).unwrap();
+
+        conn.execute(
+            "INSERT INTO annotations (id, anchor_type, anchor_value, text, created_at, updated_at)
+             VALUES ('old1', 'node', 'n1', 'pre-v2 note', 1000, 1000)",
+            [],
+        ).unwrap();
+
+        // Now run the full migration
+        ensure_branch_schema(&conn).unwrap();
+
+        let (kind, quality): (String, f64) = conn.query_row(
+            "SELECT kind, quality FROM annotations WHERE id = 'old1'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        ).unwrap();
+        assert_eq!(kind, "fact");
+        assert!((quality - 0.5).abs() < f64::EPSILON);
     }
 
     #[test]

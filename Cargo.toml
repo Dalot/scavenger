@@ -1,6 +1,6 @@
 [package]
 name = "scavenger"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 rust-version = "1.85"
 description = "Terminal-first AST dependency graph and session memory engine for Claude Code"
@@ -69,6 +69,7 @@ rayon = "1.10"
 heck = "0.5"
 strsim = "0.11"
 md5 = "0.7"
+sha2 = "0.10"
 
 # File locking
 fs2 = "0.4"

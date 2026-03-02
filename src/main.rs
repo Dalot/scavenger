@@ -125,6 +125,12 @@ enum Commands {
         purge: bool,
     },
 
+    /// Inspect the database directly (no sqlite3 needed)
+    Db {
+        #[command(subcommand)]
+        command: DbCommands,
+    },
+
     /// Start the MCP bridge (stdio JSON-RPC server for Claude Code / Cursor)
     McpBridge,
 }
@@ -193,6 +199,44 @@ enum MetricsCommands {
     },
 }
 
+#[derive(Subcommand)]
+enum DbCommands {
+    /// Overview: node/edge/file/annotation counts, DB sizes, last indexed time
+    Summary,
+    /// List indexed AST symbols
+    Nodes {
+        /// Max rows to show
+        #[arg(long, default_value = "30")]
+        limit: u32,
+    },
+    /// List indexed source files
+    Files {
+        /// Max rows to show
+        #[arg(long, default_value = "30")]
+        limit: u32,
+    },
+    /// List annotations
+    Annotations {
+        /// Max rows to show
+        #[arg(long, default_value = "30")]
+        limit: u32,
+    },
+    /// Show recent token_log entries (from daemon_meta.db)
+    Tokens {
+        /// Max rows to show
+        #[arg(long, default_value = "20")]
+        limit: u32,
+    },
+    /// Run a read-only SQL query against the branch DB
+    Query {
+        /// SQL statement (SELECT only)
+        sql: String,
+        /// Query against daemon_meta.db instead of the branch DB
+        #[arg(long)]
+        meta: bool,
+    },
+}
+
 #[derive(Clone, clap::ValueEnum)]
 enum OutputFormat {
     Human,
@@ -217,6 +261,7 @@ fn main() {
         Commands::Hook { command } => cmd_hook(command),
         Commands::Metrics { command } => cmd_metrics(command),
         Commands::Clean { purge } => cmd_clean(purge),
+        Commands::Db { command } => cmd_db(command),
         Commands::McpBridge => cmd_mcp_bridge(),
     };
 
@@ -296,8 +341,15 @@ fn cmd_init() -> Result<(), Box<dyn std::error::Error>> {
     eprintln!("  Creating Claude Code plugin...");
     hooks::register::create_plugin(&project_root)?;
 
-    // Step 5b: Register MCP bridge in .claude/settings.local.json
+    // Step 5b: Register MCP bridge (Claude Code)
     eprintln!("  Registering MCP bridge (Claude Code)...");
+    let claude_cli_ok = hooks::register::register_mcp_via_cli(&project_root)?;
+    if claude_cli_ok {
+        eprintln!("    Registered via `claude mcp add`");
+    } else {
+        eprintln!("    `claude` CLI not found — register manually with:");
+        eprintln!("    claude mcp add scavenger -- scavenger mcp-bridge");
+    }
     hooks::register::register_mcp_server(&project_root)?;
 
     // Step 5c: Clean up legacy settings.local.json entries from older versions
@@ -308,7 +360,11 @@ fn cmd_init() -> Result<(), Box<dyn std::error::Error>> {
         );
     }
 
-    // Step 5d: Create Cursor IDE config
+    // Step 5d: Register in .mcp.json for other MCP-compatible tools
+    eprintln!("  Registering MCP bridge (.mcp.json)...");
+    hooks::register::register_mcp_in_mcp_json(&project_root)?;
+
+    // Step 5e: Create Cursor IDE config
     eprintln!("  Registering MCP bridge (Cursor)...");
     hooks::register::create_cursor_mcp_config(&project_root)?;
     eprintln!("  Creating Cursor hooks...");
@@ -326,6 +382,10 @@ fn cmd_init() -> Result<(), Box<dyn std::error::Error>> {
     eprintln!(
         "  {} MCP tools + hooks registered in .cursor/ — works automatically.",
         "Cursor:".cyan().bold(),
+    );
+    eprintln!(
+        "  {} MCP bridge registered in .mcp.json",
+        "Other tools:".cyan().bold(),
     );
     eprintln!("\nThe daemon starts and stops automatically with each session.");
     Ok(())
@@ -485,6 +545,7 @@ fn cmd_annotate(
         Some(&anchor_value),
         &text,
         tags.as_deref(),
+        memory::annotations::AnnotationKind::Fact,
     )?;
 
     println!("Annotation {} created (anchored to {})", id, anchor_value);
@@ -763,6 +824,15 @@ fn cmd_hook(command: HookCommands) -> Result<(), Box<dyn std::error::Error>> {
     let project_root = std::env::current_dir()?;
     let scavenger_dir = db::scavenger_dir(&project_root);
 
+    if !scavenger_dir.exists() {
+        eprintln!(
+            "scavenger hook: .scavenger/ not found in {} (cwd mismatch?)",
+            project_root.display()
+        );
+        println!("{{}}");
+        return Ok(());
+    }
+
     match command {
         HookCommands::PreToolUse => {
             let rt = tokio::runtime::Runtime::new()?;
@@ -798,10 +868,7 @@ fn cmd_hook(command: HookCommands) -> Result<(), Box<dyn std::error::Error>> {
         HookCommands::SessionEnd => {
             let pid_path = scavenger_dir.join("daemon.pid");
             if let Some(pid) = read_pid(&pid_path) {
-                #[cfg(unix)]
-                {
-                    unsafe { libc::kill(pid, libc::SIGTERM); }
-                }
+                kill_daemon_and_wait(pid, &scavenger_dir);
             }
         }
     }
@@ -821,6 +888,46 @@ fn is_daemon_running(pid_path: &std::path::Path) -> bool {
     })
 }
 
+/// Send SIGTERM, wait up to 5s for exit, then SIGKILL if still alive.
+/// Cleans up PID file, socket, and lock on success.
+fn kill_daemon_and_wait(pid: i32, scavenger_dir: &std::path::Path) {
+    #[cfg(unix)]
+    {
+        unsafe { libc::kill(pid, libc::SIGTERM); }
+
+        let proc_path = format!("/proc/{pid}");
+        for _ in 0..50 {
+            if !std::path::Path::new(&proc_path).exists() {
+                cleanup_daemon_files(scavenger_dir);
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+
+        eprintln!("Daemon PID {pid} did not exit after SIGTERM, sending SIGKILL...");
+        unsafe { libc::kill(pid, libc::SIGKILL); }
+
+        for _ in 0..20 {
+            if !std::path::Path::new(&proc_path).exists() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+
+        cleanup_daemon_files(scavenger_dir);
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (pid, scavenger_dir);
+    }
+}
+
+fn cleanup_daemon_files(scavenger_dir: &std::path::Path) {
+    let _ = std::fs::remove_file(scavenger_dir.join("daemon.pid"));
+    let _ = std::fs::remove_file(scavenger_dir.join("daemon.sock"));
+    let _ = std::fs::remove_file(scavenger_dir.join("daemon.lock"));
+}
+
 fn cmd_metrics(command: MetricsCommands) -> Result<(), Box<dyn std::error::Error>> {
     let project_root = std::env::current_dir()?;
     let scavenger_dir = db::scavenger_dir(&project_root);
@@ -829,8 +936,9 @@ fn cmd_metrics(command: MetricsCommands) -> Result<(), Box<dyn std::error::Error
         MetricsCommands::List => {
             let sessions = hooks::metrics::list_sessions(&scavenger_dir);
             if sessions.is_empty() {
-                eprintln!("No metrics sessions found. Metrics are collected automatically by Cursor hooks.");
-                eprintln!("Start a Cursor chat and the audit hooks will log tool calls to .scavenger/metrics/");
+                eprintln!("No metrics sessions found.");
+                eprintln!("Metrics are collected automatically via audit hooks (Claude Code plugin or Cursor hooks).");
+                eprintln!("Start a session and the audit hooks will log tool calls to .scavenger/metrics/");
                 return Ok(());
             }
             print!("{}", hooks::metrics::format_list(&scavenger_dir, &sessions));
@@ -891,16 +999,21 @@ fn cmd_clean(purge: bool) -> Result<(), Box<dyn std::error::Error>> {
 
     let pid_path = scavenger_dir.join("daemon.pid");
     if let Some(pid) = read_pid(&pid_path) {
-        #[cfg(unix)]
-        {
-            unsafe { libc::kill(pid, libc::SIGTERM); }
-        }
+        kill_daemon_and_wait(pid, &scavenger_dir);
         removed.push("stopped running daemon");
     }
 
     if plugin.exists() {
         std::fs::remove_dir_all(&plugin)?;
         removed.push("Claude Code plugin (.scavenger/claude-plugin/)");
+    }
+
+    if hooks::register::remove_mcp_via_cli(&project_root).unwrap_or(false) {
+        removed.push("Claude Code MCP registration (via claude mcp remove)");
+    }
+
+    if let Ok(()) = hooks::register::remove_mcp_from_mcp_json(&project_root) {
+        removed.push(".mcp.json scavenger entry");
     }
 
     if let Ok(()) = hooks::register::remove_cursor_config(&project_root) {
@@ -924,6 +1037,182 @@ fn cmd_clean(purge: bool) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+fn cmd_db(command: DbCommands) -> Result<(), Box<dyn std::error::Error>> {
+    let project_root = std::env::current_dir()?;
+    let scavenger_dir = db::scavenger_dir(&project_root);
+    if !scavenger_dir.exists() {
+        return Err("Not initialized. Run `scavenger init` first.".into());
+    }
+    let branch = daemon::detect_branch(&project_root);
+
+    match command {
+        DbCommands::Summary => {
+            let conn = db::open_branch_db(&scavenger_dir, &branch)?;
+            let meta_conn = db::open_daemon_meta_db(&scavenger_dir)?;
+
+            let node_count: i64 = conn.query_row("SELECT COUNT(*) FROM nodes", [], |r| r.get(0))?;
+            let edge_count: i64 = conn.query_row("SELECT COUNT(*) FROM edges", [], |r| r.get(0))?;
+            let file_count: i64 = conn.query_row("SELECT COUNT(*) FROM files", [], |r| r.get(0))?;
+            let annotation_count: i64 = conn.query_row("SELECT COUNT(*) FROM annotations", [], |r| r.get(0))?;
+            let signal_count: i64 = conn.query_row("SELECT COUNT(*) FROM behavioral_signals", [], |r| r.get(0))?;
+            let doc_chunk_count: i64 = conn.query_row("SELECT COUNT(*) FROM doc_chunks", [], |r| r.get(0))?;
+            let session_event_count: i64 = conn.query_row("SELECT COUNT(*) FROM session_log", [], |r| r.get(0))?;
+            let token_log_count: i64 = meta_conn.query_row("SELECT COUNT(*) FROM token_log", [], |r| r.get(0)).unwrap_or(0);
+            let last_indexed: Option<i64> = conn.query_row(
+                "SELECT MAX(last_indexed) FROM files", [], |r| r.get(0),
+            ).unwrap_or(None);
+
+            let sanitized = branch.replace(['/', '\\', ':', '*', '?', '"', '<', '>', '|'], "_");
+            let branch_db_path = scavenger_dir.join("indexes").join(format!("{sanitized}.db"));
+            let meta_db_path = scavenger_dir.join("daemon_meta.db");
+            let branch_db_size = std::fs::metadata(&branch_db_path).map(|m| m.len()).unwrap_or(0);
+            let meta_db_size = std::fs::metadata(&meta_db_path).map(|m| m.len()).unwrap_or(0);
+
+            println!("Scavenger DB Summary (branch: {})", branch.cyan());
+            println!("{}", "─".repeat(45));
+            println!("  Nodes:               {node_count}");
+            println!("  Edges:               {edge_count}");
+            println!("  Files indexed:       {file_count}");
+            println!("  Doc chunks:          {doc_chunk_count}");
+            println!("  Annotations:         {annotation_count}");
+            println!("  Behavioral signals:  {signal_count}");
+            println!("  Session events:      {session_event_count}");
+            println!("  Token log entries:   {token_log_count}");
+            if let Some(ts) = last_indexed {
+                println!("  Last indexed:        {ts} (unix)");
+            }
+            println!();
+            println!("  Branch DB:           {} ({:.1} MB)", branch_db_path.display(), branch_db_size as f64 / 1_048_576.0);
+            println!("  Meta DB:             {} ({:.1} MB)", meta_db_path.display(), meta_db_size as f64 / 1_048_576.0);
+        }
+        DbCommands::Nodes { limit } => {
+            let conn = db::open_branch_db(&scavenger_dir, &branch)?;
+            let mut stmt = conn.prepare(
+                "SELECT name, kind, file_path, line_start, centrality FROM nodes ORDER BY centrality DESC LIMIT ?1"
+            )?;
+            let rows = stmt.query_map([limit], |row| {
+                Ok(vec![
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, i64>(3)?.to_string(),
+                    format!("{:.4}", row.get::<_, f64>(4)?),
+                ])
+            })?.collect::<Result<Vec<_>, _>>()?;
+            print_table(
+                &["Name", "Kind", "File", "Line", "Central"],
+                &[60, 12, 80, 6, 8],
+                &rows,
+            );
+        }
+        DbCommands::Files { limit } => {
+            let conn = db::open_branch_db(&scavenger_dir, &branch)?;
+            let mut stmt = conn.prepare(
+                "SELECT file_path, file_type, raw_token_estimate, last_indexed FROM files ORDER BY last_indexed DESC LIMIT ?1"
+            )?;
+            let rows = stmt.query_map([limit], |row| {
+                Ok(vec![
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, i64>(2)?.to_string(),
+                    row.get::<_, i64>(3)?.to_string(),
+                ])
+            })?.collect::<Result<Vec<_>, _>>()?;
+            print_table(
+                &["File", "Type", "Tokens", "LastIndexed"],
+                &[80, 8, 8, 12],
+                &rows,
+            );
+        }
+        DbCommands::Annotations { limit } => {
+            let conn = db::open_branch_db(&scavenger_dir, &branch)?;
+            let mut stmt = conn.prepare(
+                "SELECT id, kind, anchor_type, anchor_value, stale, substr(text, 1, 120) FROM annotations ORDER BY updated_at DESC LIMIT ?1"
+            )?;
+            let rows = stmt.query_map([limit], |row| {
+                Ok(vec![
+                    row.get::<_, String>(0)?,
+                    row.get::<_, Option<String>>(1)?.unwrap_or_else(|| "fact".into()),
+                    row.get::<_, Option<String>>(2)?.unwrap_or_else(|| "-".into()),
+                    row.get::<_, Option<String>>(3)?.unwrap_or_else(|| "-".into()),
+                    if row.get::<_, bool>(4)? { "yes".into() } else { "no".into() },
+                    row.get::<_, String>(5)?.replace('\n', " "),
+                ])
+            })?.collect::<Result<Vec<_>, _>>()?;
+            print_table(
+                &["ID", "Kind", "AnchorType", "AnchorValue", "Stale", "Text"],
+                &[36, 10, 12, 40, 5, 80],
+                &rows,
+            );
+        }
+        DbCommands::Tokens { limit } => {
+            let meta_conn = db::open_daemon_meta_db(&scavenger_dir)?;
+            let mut stmt = meta_conn.prepare(
+                "SELECT timestamp, session_id, branch, tool_name, tokens_actual, tokens_estimated, files_touched FROM token_log ORDER BY timestamp DESC LIMIT ?1"
+            )?;
+            let rows = stmt.query_map([limit], |row| {
+                let actual: i64 = row.get(4)?;
+                let estimated: i64 = row.get(5)?;
+                let saved = if estimated > 0 {
+                    format!("{:.0}%", (1.0 - actual as f64 / estimated as f64) * 100.0)
+                } else {
+                    "-".into()
+                };
+                Ok(vec![
+                    row.get::<_, i64>(0)?.to_string(),
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    actual.to_string(),
+                    estimated.to_string(),
+                    saved,
+                    row.get::<_, Option<String>>(6)?.unwrap_or_else(|| "-".into()),
+                ])
+            })?.collect::<Result<Vec<_>, _>>()?;
+            print_table(
+                &["Timestamp", "Session", "Branch", "Tool", "Actual", "Estimated", "Saved", "File"],
+                &[12, 36, 45, 14, 8, 10, 6, 80],
+                &rows,
+            );
+        }
+        DbCommands::Query { sql, meta } => {
+            let sql_lower = sql.trim().to_lowercase();
+            if !sql_lower.starts_with("select") && !sql_lower.starts_with("pragma") && !sql_lower.starts_with("explain") {
+                return Err("Only SELECT, PRAGMA, and EXPLAIN statements are allowed.".into());
+            }
+
+            let conn = if meta {
+                db::open_daemon_meta_db(&scavenger_dir)?
+            } else {
+                db::open_branch_db(&scavenger_dir, &branch)?
+            };
+
+            let mut stmt = conn.prepare(&sql)?;
+            let col_count = stmt.column_count();
+            let col_names: Vec<String> = (0..col_count).map(|i| stmt.column_name(i).unwrap_or("?").to_string()).collect();
+            println!("{}", col_names.join(" | "));
+            println!("{}", "─".repeat(col_names.iter().map(|c| c.len() + 3).sum::<usize>()));
+
+            let mut rows = stmt.query([])?;
+            while let Some(row) = rows.next()? {
+                let vals: Vec<String> = (0..col_count).map(|i| {
+                    row.get::<_, rusqlite::types::Value>(i)
+                        .map(|v| match v {
+                            rusqlite::types::Value::Null => "NULL".to_string(),
+                            rusqlite::types::Value::Integer(n) => n.to_string(),
+                            rusqlite::types::Value::Real(f) => format!("{f:.4}"),
+                            rusqlite::types::Value::Text(s) => s,
+                            rusqlite::types::Value::Blob(b) => format!("[{} bytes]", b.len()),
+                        })
+                        .unwrap_or_else(|_| "?".to_string())
+                }).collect();
+                println!("{}", vals.join(" | "));
+            }
+        }
+    }
+    Ok(())
+}
+
 fn cmd_mcp_bridge() -> Result<(), Box<dyn std::error::Error>> {
     let project_root = std::env::current_dir()?;
     let scavenger_dir = db::scavenger_dir(&project_root);
@@ -934,6 +1223,62 @@ fn cmd_mcp_bridge() -> Result<(), Box<dyn std::error::Error>> {
 
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(bridge::run_mcp_bridge(scavenger_dir))
+}
+
+/// Print a table with adaptive column widths.
+///
+/// Each column width = min(cap, max(header_len, max_data_len)).
+/// The last column has no cap -- it gets whatever space remains.
+/// Values exceeding the cap are truncated with "…".
+fn print_table(headers: &[&str], caps: &[usize], rows: &[Vec<String>]) {
+    if rows.is_empty() {
+        eprintln!("No rows found.");
+        return;
+    }
+
+    let ncols = headers.len();
+    let mut widths: Vec<usize> = headers.iter().map(|h| h.len()).collect();
+
+    for row in rows {
+        for (i, val) in row.iter().enumerate().take(ncols) {
+            widths[i] = widths[i].max(val.len());
+        }
+    }
+
+    // Apply caps (last column uncapped -- it's the tail)
+    for (i, w) in widths.iter_mut().enumerate() {
+        if i < ncols.saturating_sub(1) {
+            *w = (*w).min(caps.get(i).copied().unwrap_or(usize::MAX));
+        } else {
+            *w = (*w).min(caps.get(i).copied().unwrap_or(usize::MAX));
+        }
+    }
+
+    // Header
+    let mut header_line = String::new();
+    for (i, h) in headers.iter().enumerate() {
+        if i > 0 { header_line.push_str("  "); }
+        header_line.push_str(&format!("{:<width$}", h, width = widths[i]));
+    }
+    println!("{header_line}");
+    println!("{}", "─".repeat(header_line.len()));
+
+    // Rows
+    for row in rows {
+        let mut line = String::new();
+        for i in 0..ncols {
+            if i > 0 { line.push_str("  "); }
+            let val = row.get(i).map(|s| s.as_str()).unwrap_or("");
+            let w = widths[i];
+            if val.len() > w && w > 1 {
+                line.push_str(&val[..w - 1]);
+                line.push('…');
+            } else {
+                line.push_str(&format!("{:<width$}", val, width = w));
+            }
+        }
+        println!("{line}");
+    }
 }
 
 fn append_to_gitignore(project_root: &std::path::Path) -> Result<(), std::io::Error> {

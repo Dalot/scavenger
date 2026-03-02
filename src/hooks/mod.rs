@@ -182,8 +182,20 @@ pub fn handle_session_start_with_context() {
 fn read_stdin_json() -> Result<Value, Box<dyn std::error::Error>> {
     let mut buf = String::new();
     std::io::Read::read_to_string(&mut std::io::stdin(), &mut buf)?;
-    let val: Value = serde_json::from_str(&buf).unwrap_or_else(|_| json!({}));
-    Ok(val)
+    if buf.trim().is_empty() {
+        eprintln!("scavenger: hook received empty stdin");
+        return Ok(json!({}));
+    }
+    match serde_json::from_str(&buf) {
+        Ok(val) => Ok(val),
+        Err(e) => {
+            eprintln!(
+                "scavenger: hook stdin JSON parse error: {e} (first 200 chars: {:?})",
+                &buf[..buf.len().min(200)]
+            );
+            Ok(json!({}))
+        }
+    }
 }
 
 fn print_json(value: &Value) {

@@ -148,16 +148,23 @@ fn compute_proximity(
     }
 }
 
-/// Annotation: (0.5 * bm25 + 0.3 * proximity + 0.2 * recency) * (0.6 if stale else 1.0)
+/// Annotation: (0.4*bm25 + 0.25*proximity + 0.15*recency + 0.2*quality) * stale * kind
 fn score_annotation(item: &CandidateItem, target: Option<&NodeId>, ctx: &ScoringContext) -> f64 {
     let bm25 = item.bm25_score.unwrap_or(0.5);
     let proximity = compute_proximity(item, target, ctx);
     let recency = item.timestamp
         .map(|ts| recency_decay(ts))
         .unwrap_or(0.5);
-    let base = 0.5 * bm25 + 0.3 * proximity + 0.2 * recency;
+    let quality = item.quality.unwrap_or(0.5);
+    let base = 0.4 * bm25 + 0.25 * proximity + 0.15 * recency + 0.2 * quality;
     let stale_penalty = if item.stale { 0.6 } else { 1.0 };
-    (base * stale_penalty).clamp(0.0, 1.0)
+    let kind_multiplier = match item.annotation_kind.as_deref() {
+        Some("pitfall") => 1.2,
+        Some("strategy") => 1.1,
+        Some("context") => 0.8,
+        _ => 1.0,
+    };
+    (base * stale_penalty * kind_multiplier).clamp(0.0, 1.0)
 }
 
 /// DocChunk: 0.7 * bm25_doc + (0.3 if priority else 0.0)
@@ -236,6 +243,9 @@ mod tests {
             change_significance: None,
             bm25_score: None,
             timestamp: None,
+            annotation_kind: None,
+            quality: None,
+            annotation_id: None,
         }
     }
 
@@ -319,6 +329,66 @@ mod tests {
         let mut proj_item = make_item(CandidateSource::Annotation, None);
         proj_item.anchor_type = None;
         assert!((compute_proximity(&proj_item, Some(&target), &ctx) - 0.3).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_pitfall_scored_higher_than_fact() {
+        let g = make_graph();
+        let target = NodeId("t1".to_string());
+
+        let mut pitfall = make_item(CandidateSource::Annotation, Some(target.clone()));
+        pitfall.anchor_type = Some("node".to_string());
+        pitfall.annotation_kind = Some("pitfall".to_string());
+
+        let mut fact = make_item(CandidateSource::Annotation, Some(target.clone()));
+        fact.anchor_type = Some("node".to_string());
+        fact.annotation_kind = Some("fact".to_string());
+
+        score(std::slice::from_mut(&mut pitfall), &g, Some(&target), &[]);
+        score(std::slice::from_mut(&mut fact), &g, Some(&target), &[]);
+        assert!(pitfall.score > fact.score, "pitfall ({}) should rank higher than fact ({})", pitfall.score, fact.score);
+    }
+
+    #[test]
+    fn test_context_scored_lower_than_fact() {
+        let g = make_graph();
+        let target = NodeId("t1".to_string());
+
+        let mut context = make_item(CandidateSource::Annotation, Some(target.clone()));
+        context.anchor_type = Some("node".to_string());
+        context.annotation_kind = Some("context".to_string());
+
+        let mut fact = make_item(CandidateSource::Annotation, Some(target.clone()));
+        fact.anchor_type = Some("node".to_string());
+        fact.annotation_kind = Some("fact".to_string());
+
+        score(std::slice::from_mut(&mut context), &g, Some(&target), &[]);
+        score(std::slice::from_mut(&mut fact), &g, Some(&target), &[]);
+        assert!(context.score < fact.score, "context ({}) should rank lower than fact ({})", context.score, fact.score);
+    }
+
+    #[test]
+    fn test_quality_affects_score() {
+        let g = make_graph();
+        let target = NodeId("t1".to_string());
+
+        let mut high_q = make_item(CandidateSource::Annotation, Some(target.clone()));
+        high_q.anchor_type = Some("node".to_string());
+        high_q.quality = Some(0.9);
+
+        let mut low_q = make_item(CandidateSource::Annotation, Some(target.clone()));
+        low_q.anchor_type = Some("node".to_string());
+        low_q.quality = Some(0.1);
+
+        score(std::slice::from_mut(&mut high_q), &g, Some(&target), &[]);
+        score(std::slice::from_mut(&mut low_q), &g, Some(&target), &[]);
+        assert!(high_q.score > low_q.score, "high quality ({}) should rank higher than low quality ({})", high_q.score, low_q.score);
+    }
+
+    #[test]
+    fn test_scoring_weights_sum_to_one() {
+        let sum: f64 = 0.4 + 0.25 + 0.15 + 0.2;
+        assert!((sum - 1.0).abs() < f64::EPSILON, "weights should sum to 1.0, got {sum}");
     }
 
     #[test]

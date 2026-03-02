@@ -159,12 +159,14 @@ pub fn insert_annotation(
     anchor_value: Option<&str>,
     text: &str,
     tags: Option<&str>,
+    kind: &str,
+    content_hash: Option<&str>,
     now: i64,
 ) -> DbResult<()> {
     conn.execute(
-        "INSERT INTO annotations (id, anchor_type, anchor_value, text, tags, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6)",
-        params![id, anchor_type, anchor_value, text, tags, now],
+        "INSERT INTO annotations (id, anchor_type, anchor_value, text, tags, kind, content_hash, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8)",
+        params![id, anchor_type, anchor_value, text, tags, kind, content_hash, now],
     )?;
     Ok(())
 }
@@ -183,7 +185,7 @@ pub fn get_annotations_for_anchor(
     anchor_value: &str,
 ) -> DbResult<Vec<AnnotationRow>> {
     let mut stmt = conn.prepare(
-        "SELECT id, text, tags, stale, created_at, updated_at
+        "SELECT id, text, tags, stale, created_at, updated_at, kind, quality, retrieval_count
          FROM annotations WHERE anchor_type = ?1 AND anchor_value = ?2",
     )?;
     let rows = stmt
@@ -195,6 +197,9 @@ pub fn get_annotations_for_anchor(
                 stale: row.get(3)?,
                 created_at: row.get(4)?,
                 updated_at: row.get(5)?,
+                kind: row.get(6)?,
+                quality: row.get(7)?,
+                retrieval_count: row.get(8)?,
             })
         })?
         .collect::<Result<Vec<_>, _>>()?;
@@ -208,6 +213,143 @@ pub struct AnnotationRow {
     pub stale: bool,
     pub created_at: i64,
     pub updated_at: i64,
+    pub kind: String,
+    pub quality: f64,
+    pub retrieval_count: i64,
+}
+
+pub fn find_annotation_by_content_hash(
+    conn: &Connection,
+    content_hash: &str,
+) -> DbResult<Option<String>> {
+    let result = conn
+        .query_row(
+            "SELECT id FROM annotations WHERE content_hash = ?1",
+            params![content_hash],
+            |row| row.get(0),
+        )
+        .optional()?;
+    Ok(result)
+}
+
+pub fn increment_retrieval_count(conn: &Connection, ids: &[String]) -> DbResult<()> {
+    let mut stmt = conn.prepare(
+        "UPDATE annotations SET retrieval_count = retrieval_count + 1 WHERE id = ?1",
+    )?;
+    for id in ids {
+        stmt.execute(params![id])?;
+    }
+    Ok(())
+}
+
+pub fn update_annotation_quality(conn: &Connection, id: &str, delta: f64) -> DbResult<()> {
+    conn.execute(
+        "UPDATE annotations SET quality = MIN(1.0, MAX(0.0, quality + ?1)) WHERE id = ?2",
+        params![delta, id],
+    )?;
+    Ok(())
+}
+
+pub fn get_low_quality_annotations(
+    conn: &Connection,
+    threshold: f64,
+    min_retrievals: u32,
+) -> DbResult<Vec<AnnotationRow>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, text, tags, stale, created_at, updated_at, kind, quality, retrieval_count
+         FROM annotations WHERE quality < ?1 AND retrieval_count >= ?2",
+    )?;
+    let rows = stmt
+        .query_map(params![threshold, min_retrievals], |row| {
+            Ok(AnnotationRow {
+                id: row.get(0)?,
+                text: row.get(1)?,
+                tags: row.get(2)?,
+                stale: row.get(3)?,
+                created_at: row.get(4)?,
+                updated_at: row.get(5)?,
+                kind: row.get(6)?,
+                quality: row.get(7)?,
+                retrieval_count: row.get(8)?,
+            })
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(rows)
+}
+
+// ── Annotation Edges ──
+
+pub struct AnnotationEdgeRow {
+    pub from_id: String,
+    pub to_id: String,
+    pub relation: String,
+    pub weight: f64,
+    pub created_at: i64,
+}
+
+pub fn upsert_annotation_edge(
+    conn: &Connection,
+    from_id: &str,
+    to_id: &str,
+    relation: &str,
+    weight: f64,
+    created_at: i64,
+) -> DbResult<()> {
+    conn.execute(
+        "INSERT INTO annotation_edges (from_id, to_id, relation, weight, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5)
+         ON CONFLICT(from_id, to_id, relation) DO UPDATE SET
+            weight = annotation_edges.weight + excluded.weight",
+        params![from_id, to_id, relation, weight, created_at],
+    )?;
+    Ok(())
+}
+
+pub fn get_annotation_edges_from(
+    conn: &Connection,
+    from_id: &str,
+) -> DbResult<Vec<AnnotationEdgeRow>> {
+    let mut stmt = conn.prepare(
+        "SELECT from_id, to_id, relation, weight, created_at
+         FROM annotation_edges WHERE from_id = ?1",
+    )?;
+    let rows = stmt
+        .query_map(params![from_id], |row| {
+            Ok(AnnotationEdgeRow {
+                from_id: row.get(0)?,
+                to_id: row.get(1)?,
+                relation: row.get(2)?,
+                weight: row.get(3)?,
+                created_at: row.get(4)?,
+            })
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(rows)
+}
+
+pub fn get_related_annotation_ids(
+    conn: &Connection,
+    annotation_id: &str,
+    limit: u32,
+) -> DbResult<Vec<String>> {
+    let mut stmt = conn.prepare(
+        "SELECT to_id FROM annotation_edges WHERE from_id = ?1
+         UNION
+         SELECT from_id FROM annotation_edges WHERE to_id = ?1
+         ORDER BY 1 LIMIT ?2",
+    )?;
+    let rows = stmt
+        .query_map(params![annotation_id, limit], |row| row.get(0))?
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(rows)
+}
+
+pub fn delete_annotation_edges(conn: &Connection, annotation_id: &str) -> DbResult<()> {
+    conn.execute(
+        "DELETE FROM annotation_edges WHERE from_id = ?1 OR to_id = ?1",
+        params![annotation_id],
+    )?;
+    Ok(())
 }
 
 // ── Behavioral Signals ──
@@ -565,7 +707,7 @@ pub fn get_doc_chunks_for_file(conn: &Connection, file_name: &str) -> DbResult<V
 
 pub fn get_project_level_annotations(conn: &Connection) -> DbResult<Vec<AnnotationRow>> {
     let mut stmt = conn.prepare(
-        "SELECT id, text, tags, stale, created_at, updated_at
+        "SELECT id, text, tags, stale, created_at, updated_at, kind, quality, retrieval_count
          FROM annotations WHERE anchor_type IS NULL",
     )?;
     let rows = stmt
@@ -577,6 +719,9 @@ pub fn get_project_level_annotations(conn: &Connection) -> DbResult<Vec<Annotati
                 stale: row.get(3)?,
                 created_at: row.get(4)?,
                 updated_at: row.get(5)?,
+                kind: row.get(6)?,
+                quality: row.get(7)?,
+                retrieval_count: row.get(8)?,
             })
         })?
         .collect::<Result<Vec<_>, _>>()?;

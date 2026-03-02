@@ -36,8 +36,16 @@ pub struct MetricsEvent {
 /// Handle the generic audit hook. Reads stdin JSON from any Cursor hook event,
 /// extracts key metrics, and appends to `.scavenger/metrics/<conversation_id>.jsonl`.
 pub fn handle_audit(scavenger_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
-    let input = super::read_stdin_json()?;
+    let input = match super::read_stdin_json() {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("scavenger audit: failed to read stdin: {e}");
+            super::print_json(&json!({}));
+            return Ok(());
+        }
+    };
 
+    // Claude Code sends "session_id", Cursor sends "conversation_id".
     let event_name = input
         .get("hook_event_name")
         .and_then(|v| v.as_str())
@@ -46,6 +54,7 @@ pub fn handle_audit(scavenger_dir: &Path) -> Result<(), Box<dyn std::error::Erro
 
     let conversation_id = input
         .get("conversation_id")
+        .or_else(|| input.get("session_id"))
         .and_then(|v| v.as_str())
         .unwrap_or("unknown")
         .to_string();
@@ -81,6 +90,7 @@ pub fn handle_audit(scavenger_dir: &Path) -> Result<(), Box<dyn std::error::Erro
     };
 
     match event_name.as_str() {
+        // Cursor camelCase events
         "postToolUse" => {
             evt.tool_name = input.get("tool_name").and_then(|v| v.as_str()).map(String::from);
             evt.input_bytes = input
@@ -104,12 +114,49 @@ pub fn handle_audit(scavenger_dir: &Path) -> Result<(), Box<dyn std::error::Erro
                 .map(|s| s.len());
             evt.duration_ms = input.get("duration").and_then(|v| v.as_u64());
         }
-        "preCompact" => {
+        // Claude Code PascalCase events
+        "PreToolUse" => {
+            evt.tool_name = input.get("tool_name").and_then(|v| v.as_str()).map(String::from);
+            evt.input_bytes = input
+                .get("tool_input")
+                .map(|v| serde_json::to_string(v).unwrap_or_default().len());
+        }
+        "PostToolUse" | "PostToolUseFailure" => {
+            evt.tool_name = input.get("tool_name").and_then(|v| v.as_str()).map(String::from);
+            evt.input_bytes = input
+                .get("tool_input")
+                .map(|v| serde_json::to_string(v).unwrap_or_default().len());
+            evt.output_bytes = input
+                .get("tool_response")
+                .map(|v| serde_json::to_string(v).unwrap_or_default().len());
+            if let Some(path) = input.get("tool_input")
+                .and_then(|v| v.get("file_path"))
+                .and_then(|v| v.as_str())
+            {
+                evt.file_path = Some(path.to_string());
+            }
+        }
+        "SessionStart" => {
+            evt.status = input.get("source").and_then(|v| v.as_str()).map(String::from);
+            if evt.model.is_empty() {
+                evt.model = input.get("model").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            }
+        }
+        "Stop" => {
+            evt.status = input.get("stop_hook_active").map(|_| "stop".to_string());
+        }
+        "PreCompact" | "preCompact" => {
             evt.context_tokens = input.get("context_tokens").and_then(|v| v.as_u64());
             evt.context_window_size = input.get("context_window_size").and_then(|v| v.as_u64());
             evt.context_usage_pct = input.get("context_usage_percent").and_then(|v| v.as_f64());
         }
-        "stop" | "sessionEnd" => {
+        "SessionEnd" | "sessionEnd" => {
+            evt.status = input.get("status").or_else(|| input.get("reason"))
+                .and_then(|v| v.as_str()).map(String::from);
+            evt.loop_count = input.get("loop_count").and_then(|v| v.as_u64()).map(|v| v as u32);
+            evt.duration_ms = input.get("duration_ms").and_then(|v| v.as_u64());
+        }
+        "stop" => {
             evt.status = input.get("status").or_else(|| input.get("reason"))
                 .and_then(|v| v.as_str()).map(String::from);
             evt.loop_count = input.get("loop_count").and_then(|v| v.as_u64()).map(|v| v as u32);
@@ -122,17 +169,30 @@ pub fn handle_audit(scavenger_dir: &Path) -> Result<(), Box<dyn std::error::Erro
     }
 
     let metrics_dir = scavenger_dir.join("metrics");
-    std::fs::create_dir_all(&metrics_dir)?;
+    if let Err(e) = std::fs::create_dir_all(&metrics_dir) {
+        eprintln!("scavenger audit: failed to create metrics dir {}: {e}", metrics_dir.display());
+        super::print_json(&json!({}));
+        return Ok(());
+    }
 
     let log_path = metrics_dir.join(format!("{conversation_id}.jsonl"));
     let line = serde_json::to_string(&evt)? + "\n";
 
     use std::io::Write;
-    let mut file = std::fs::OpenOptions::new()
+    match std::fs::OpenOptions::new()
         .create(true)
         .append(true)
-        .open(&log_path)?;
-    file.write_all(line.as_bytes())?;
+        .open(&log_path)
+    {
+        Ok(mut file) => {
+            if let Err(e) = file.write_all(line.as_bytes()) {
+                eprintln!("scavenger audit: write error: {e}");
+            }
+        }
+        Err(e) => {
+            eprintln!("scavenger audit: failed to open {}: {e}", log_path.display());
+        }
+    }
 
     super::print_json(&json!({}));
     Ok(())
@@ -257,7 +317,7 @@ pub fn analyze_session(scavenger_dir: &Path, conversation_id: &str) -> Option<Se
 
     for evt in &events {
         match evt.event.as_str() {
-            "postToolUse" => {
+            "postToolUse" | "PostToolUse" => {
                 summary.total_tool_calls += 1;
                 if let Some(name) = &evt.tool_name {
                     *summary.tool_breakdown.entry(name.clone()).or_insert(0) += 1;
@@ -279,6 +339,12 @@ pub fn analyze_session(scavenger_dir: &Path, conversation_id: &str) -> Option<Se
                 summary.total_input_bytes += evt.input_bytes.unwrap_or(0);
                 summary.total_output_bytes += evt.output_bytes.unwrap_or(0);
                 summary.total_duration_ms += evt.duration_ms.unwrap_or(0);
+                if evt.event == "PostToolUse" {
+                    summary.scavenger_active = true;
+                }
+            }
+            "PreToolUse" => {
+                summary.scavenger_active = true;
             }
             "afterMCPExecution" => {
                 summary.mcp_calls += 1;
@@ -361,20 +427,19 @@ pub fn format_list(scavenger_dir: &Path, sessions: &[String]) -> String {
     let mut out = String::new();
 
     out.push_str(&format!(
-        "{:<10} {:<18} {:>6} {:>6} {:>6} {:>6} {:>10}\n",
+        "{:<10} {:<38} {:>6} {:>6} {:>6} {:>6} {:>10}\n",
         "Condition", "Session", "Tools", "Caps.", "Reads", "Greps", "Est.OutTok"
     ));
-    out.push_str(&"─".repeat(68));
+    out.push_str(&"─".repeat(86));
     out.push('\n');
 
     for id in sessions {
         if let Some(s) = analyze_session(scavenger_dir, id) {
-            let short_id = if id.len() > 16 { &id[..16] } else { id };
             let condition = if s.scavenger_active { "[WITH]" } else { "[WITHOUT]" };
             out.push_str(&format!(
-                "{:<10} {:<18} {:>6} {:>6} {:>6} {:>6} {:>10}\n",
+                "{:<10} {:<38} {:>6} {:>6} {:>6} {:>6} {:>10}\n",
                 condition,
-                short_id,
+                id,
                 s.total_tool_calls,
                 s.capsule_calls(),
                 s.file_reads,

@@ -14,6 +14,7 @@ pub enum PluginError {
 
 const SCAVENGER_PRE_CMD: &str = "scavenger hook pre-tool-use";
 const SCAVENGER_POST_CMD: &str = "scavenger hook post-tool-use";
+const SCAVENGER_AUDIT_CMD: &str = "scavenger hook audit";
 
 // ── Cursor IDE integration ──────────────────────────────────────────
 
@@ -210,29 +211,47 @@ pub fn create_plugin(project_root: &Path) -> Result<(), PluginError> {
         serde_json::to_string_pretty(&json!({
             "name": "scavenger",
             "description": "AST dependency graph and session memory engine -- serves focused capsules instead of full files",
-            "version": "0.1.0"
+            "version": "0.1.1"
         }))?,
     )?;
+
+    let audit = json!({ "type": "command", "command": SCAVENGER_AUDIT_CMD });
 
     std::fs::write(
         root.join("hooks").join("hooks.json"),
         serde_json::to_string_pretty(&json!({
-            "description": "Scavenger hooks for daemon lifecycle, capsule serving, and graph updates",
+            "description": "Scavenger hooks for daemon lifecycle, capsule serving, metrics, and graph updates",
             "hooks": {
                 "SessionStart": [{
-                    "hooks": [{ "type": "command", "command": "scavenger hook session-start" }]
+                    "hooks": [
+                        { "type": "command", "command": "scavenger hook session-start" },
+                        audit,
+                    ]
                 }],
                 "SessionEnd": [{
-                    "hooks": [{ "type": "command", "command": "scavenger hook session-end" }]
+                    "hooks": [
+                        { "type": "command", "command": "scavenger hook session-end" },
+                        audit,
+                    ]
                 }],
-                "PreToolUse": [{
-                    "matcher": "Read",
-                    "hooks": [{ "type": "command", "command": SCAVENGER_PRE_CMD }]
-                }],
-                "PostToolUse": [{
-                    "matcher": "Write|Edit|MultiEdit",
-                    "hooks": [{ "type": "command", "command": SCAVENGER_POST_CMD }]
-                }]
+                "PreToolUse": [
+                    {
+                        "matcher": "Read",
+                        "hooks": [{ "type": "command", "command": SCAVENGER_PRE_CMD }]
+                    },
+                    {
+                        "hooks": [audit]
+                    }
+                ],
+                "PostToolUse": [
+                    {
+                        "matcher": "Write|Edit|MultiEdit",
+                        "hooks": [{ "type": "command", "command": SCAVENGER_POST_CMD }]
+                    },
+                    {
+                        "hooks": [audit]
+                    }
+                ]
             }
         }))?,
     )?;
@@ -240,9 +259,108 @@ pub fn create_plugin(project_root: &Path) -> Result<(), PluginError> {
     Ok(())
 }
 
-/// Register the MCP bridge server in `.claude/settings.local.json` so that
-/// Claude Code discovers Scavenger's 5 MCP tools (get_capsule, read_annotations,
-/// write_annotation, delete_annotation, search_docs).
+// ── Claude Code CLI integration ─────────────────────────────────────
+
+/// Try registering the MCP bridge via `claude mcp add`. Returns `Ok(true)` if
+/// the CLI was found and registration succeeded, `Ok(false)` if `claude` is not
+/// on PATH or the command failed. Never returns an error for missing CLI.
+pub fn register_mcp_via_cli(project_root: &Path) -> Result<bool, PluginError> {
+    let status = std::process::Command::new("claude")
+        .args(["mcp", "add", "scavenger", "--", "scavenger", "mcp-bridge"])
+        .current_dir(project_root)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status();
+
+    match status {
+        Ok(s) if s.success() => Ok(true),
+        _ => Ok(false),
+    }
+}
+
+/// Try removing the scavenger MCP entry via `claude mcp remove`.
+pub fn remove_mcp_via_cli(project_root: &Path) -> Result<bool, PluginError> {
+    let status = std::process::Command::new("claude")
+        .args(["mcp", "remove", "scavenger"])
+        .current_dir(project_root)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status();
+
+    match status {
+        Ok(s) if s.success() => Ok(true),
+        _ => Ok(false),
+    }
+}
+
+// ── .mcp.json (de-facto standard for MCP-compatible tools) ──────────
+
+/// Register the MCP bridge in `.mcp.json` at the project root. Preserves
+/// existing servers — only adds/overwrites the `scavenger` entry.
+pub fn register_mcp_in_mcp_json(project_root: &Path) -> Result<(), PluginError> {
+    let mcp_path = project_root.join(".mcp.json");
+
+    let mut config: serde_json::Value = if mcp_path.exists() {
+        let content = std::fs::read_to_string(&mcp_path)?;
+        if content.trim().is_empty() {
+            json!({})
+        } else {
+            serde_json::from_str(&content).unwrap_or(json!({}))
+        }
+    } else {
+        json!({})
+    };
+
+    let mcp_servers = config
+        .as_object_mut()
+        .unwrap()
+        .entry("mcpServers")
+        .or_insert_with(|| json!({}));
+
+    mcp_servers["scavenger"] = json!({
+        "command": "scavenger",
+        "args": ["mcp-bridge"],
+    });
+
+    std::fs::write(&mcp_path, serde_json::to_string_pretty(&config)?)?;
+    Ok(())
+}
+
+/// Remove the scavenger entry from `.mcp.json`. Deletes the file if it
+/// becomes empty (or contains only an empty `mcpServers` object).
+pub fn remove_mcp_from_mcp_json(project_root: &Path) -> Result<(), PluginError> {
+    let mcp_path = project_root.join(".mcp.json");
+    if !mcp_path.exists() {
+        return Ok(());
+    }
+
+    let content = std::fs::read_to_string(&mcp_path)?;
+    let mut config: serde_json::Value = match serde_json::from_str(&content) {
+        Ok(v) => v,
+        Err(_) => return Ok(()),
+    };
+
+    if let Some(servers) = config.get_mut("mcpServers").and_then(|v| v.as_object_mut()) {
+        servers.remove("scavenger");
+        if servers.is_empty() {
+            config.as_object_mut().unwrap().remove("mcpServers");
+        }
+    }
+
+    if config.as_object().is_some_and(|o| o.is_empty()) {
+        let _ = std::fs::remove_file(&mcp_path);
+    } else {
+        std::fs::write(&mcp_path, serde_json::to_string_pretty(&config)?)?;
+    }
+
+    Ok(())
+}
+
+// ── .claude/settings.local.json (fallback for future Claude Code fix) ─
+
+/// Register the MCP bridge server in `.claude/settings.local.json` as a
+/// fallback. Claude Code has a known bug where it doesn't read mcpServers
+/// from this file, but we keep it for forward-compatibility.
 pub fn register_mcp_server(project_root: &Path) -> Result<(), PluginError> {
     let claude_dir = project_root.join(".claude");
     std::fs::create_dir_all(&claude_dir)?;
@@ -431,7 +549,7 @@ mod tests {
         let manifest = read_json(&plugin_dir(tmp.path()).join(".claude-plugin/plugin.json"));
         assert_eq!(manifest["name"], "scavenger");
         assert!(manifest["description"].as_str().unwrap().contains("AST"));
-        assert_eq!(manifest["version"], "0.1.0");
+        assert_eq!(manifest["version"], "0.1.1");
     }
 
     #[test]
@@ -444,12 +562,16 @@ mod tests {
 
         let pre = &hooks["hooks"]["PreToolUse"];
         assert_eq!(pre[0]["matcher"], "Read");
-        assert_eq!(pre[0]["hooks"][0]["type"], "command");
         assert_eq!(pre[0]["hooks"][0]["command"], SCAVENGER_PRE_CMD);
+        assert_eq!(pre[1]["hooks"][0]["command"], SCAVENGER_AUDIT_CMD);
 
         let post = &hooks["hooks"]["PostToolUse"];
         assert_eq!(post[0]["matcher"], "Write|Edit|MultiEdit");
         assert_eq!(post[0]["hooks"][0]["command"], SCAVENGER_POST_CMD);
+        assert_eq!(post[1]["hooks"][0]["command"], SCAVENGER_AUDIT_CMD);
+
+        let start = &hooks["hooks"]["SessionStart"];
+        assert_eq!(start[0]["hooks"][1]["command"], SCAVENGER_AUDIT_CMD);
     }
 
     #[test]
@@ -459,7 +581,8 @@ mod tests {
         create_plugin(tmp.path()).unwrap();
 
         let hooks = read_json(&plugin_dir(tmp.path()).join("hooks/hooks.json"));
-        assert_eq!(hooks["hooks"]["PreToolUse"].as_array().unwrap().len(), 1);
+        // 2 entries: Read matcher + audit catch-all
+        assert_eq!(hooks["hooks"]["PreToolUse"].as_array().unwrap().len(), 2);
     }
 
     // ---- remove_legacy_settings tests ----
@@ -683,6 +806,91 @@ mod tests {
         assert!(!tmp.path().join(".cursor/mcp.json").exists());
         assert!(!tmp.path().join(".cursor/hooks.json").exists());
     }
+
+    // ---- .mcp.json tests ----
+
+    #[test]
+    fn test_register_mcp_in_mcp_json_creates_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        register_mcp_in_mcp_json(tmp.path()).unwrap();
+
+        let config = read_json(&tmp.path().join(".mcp.json"));
+        assert_eq!(config["mcpServers"]["scavenger"]["command"], "scavenger");
+        assert_eq!(config["mcpServers"]["scavenger"]["args"][0], "mcp-bridge");
+    }
+
+    #[test]
+    fn test_register_mcp_in_mcp_json_preserves_existing() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(
+            tmp.path().join(".mcp.json"),
+            serde_json::to_string_pretty(&json!({
+                "mcpServers": { "supabase": { "command": "npx", "args": ["-y", "@supabase/mcp-server-supabase"] } }
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        register_mcp_in_mcp_json(tmp.path()).unwrap();
+
+        let config = read_json(&tmp.path().join(".mcp.json"));
+        assert_eq!(config["mcpServers"]["supabase"]["command"], "npx");
+        assert_eq!(config["mcpServers"]["scavenger"]["command"], "scavenger");
+    }
+
+    #[test]
+    fn test_register_mcp_in_mcp_json_is_idempotent() {
+        let tmp = tempfile::tempdir().unwrap();
+        register_mcp_in_mcp_json(tmp.path()).unwrap();
+        register_mcp_in_mcp_json(tmp.path()).unwrap();
+
+        let config = read_json(&tmp.path().join(".mcp.json"));
+        let servers = config["mcpServers"].as_object().unwrap();
+        assert_eq!(servers.len(), 1);
+        assert_eq!(config["mcpServers"]["scavenger"]["command"], "scavenger");
+    }
+
+    #[test]
+    fn test_remove_mcp_from_mcp_json_removes_scavenger() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(
+            tmp.path().join(".mcp.json"),
+            serde_json::to_string_pretty(&json!({
+                "mcpServers": {
+                    "scavenger": { "command": "scavenger" },
+                    "other": { "command": "other" }
+                }
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        remove_mcp_from_mcp_json(tmp.path()).unwrap();
+
+        let config = read_json(&tmp.path().join(".mcp.json"));
+        assert!(config["mcpServers"].get("scavenger").is_none());
+        assert_eq!(config["mcpServers"]["other"]["command"], "other");
+    }
+
+    #[test]
+    fn test_remove_mcp_from_mcp_json_deletes_empty_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        register_mcp_in_mcp_json(tmp.path()).unwrap();
+        assert!(tmp.path().join(".mcp.json").exists());
+
+        remove_mcp_from_mcp_json(tmp.path()).unwrap();
+        assert!(!tmp.path().join(".mcp.json").exists());
+    }
+
+    #[test]
+    fn test_remove_mcp_from_mcp_json_noop_when_missing() {
+        let tmp = tempfile::tempdir().unwrap();
+        remove_mcp_from_mcp_json(tmp.path()).unwrap();
+    }
+
+    // CLI registration (`register_mcp_via_cli`) is not unit-tested because it
+    // spawns `claude` as a subprocess. It gracefully returns Ok(false) when the
+    // CLI is missing, which is verified by integration tests.
 
     #[test]
     fn test_remove_cursor_config_preserves_other_entries() {

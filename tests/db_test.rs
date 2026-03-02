@@ -13,7 +13,7 @@ fn setup() -> Connection {
 fn test_schema_version_set() {
     let conn = setup();
     let ver: u32 = conn.pragma_query_value(None, "user_version", |r| r.get(0)).unwrap();
-    assert_eq!(ver, 1);
+    assert_eq!(ver, 2);
 }
 
 #[test]
@@ -21,7 +21,7 @@ fn test_schema_idempotent() {
     let conn = setup();
     schema::ensure_branch_schema(&conn).unwrap();
     let ver: u32 = conn.pragma_query_value(None, "user_version", |r| r.get(0)).unwrap();
-    assert_eq!(ver, 1);
+    assert_eq!(ver, 2);
 }
 
 #[test]
@@ -110,7 +110,7 @@ fn test_file_last_indexed() {
 #[test]
 fn test_annotation_crud() {
     let conn = setup();
-    queries::insert_annotation(&conn, "a1", Some("node"), Some("n1"), "note text", None, 1000).unwrap();
+    queries::insert_annotation(&conn, "a1", Some("node"), Some("n1"), "note text", None, "fact", None, 1000).unwrap();
     let anns = queries::get_annotations_for_anchor(&conn, "node", "n1").unwrap();
     assert_eq!(anns.len(), 1);
     assert_eq!(anns[0].text, "note text");
@@ -122,6 +122,93 @@ fn test_behavioral_signal_insert_and_prune() {
     queries::insert_behavioral_signal(&conn, "THRASHING", Some("n1"), None, "s1", 100, None).unwrap();
     let pruned = queries::prune_old_signals(&conn, 200).unwrap();
     assert_eq!(pruned, 1);
+}
+
+#[test]
+fn test_annotation_edge_upsert_and_read() {
+    let conn = setup();
+    queries::insert_annotation(&conn, "a1", Some("node"), Some("n1"), "note1", None, "fact", None, 1000).unwrap();
+    queries::insert_annotation(&conn, "a2", Some("node"), Some("n2"), "note2", None, "fact", None, 1000).unwrap();
+
+    queries::upsert_annotation_edge(&conn, "a1", "a2", "related", 1.0, 1000).unwrap();
+    let edges = queries::get_annotation_edges_from(&conn, "a1").unwrap();
+    assert_eq!(edges.len(), 1);
+    assert_eq!(edges[0].to_id, "a2");
+    assert_eq!(edges[0].relation, "related");
+    assert!((edges[0].weight - 1.0).abs() < f64::EPSILON);
+}
+
+#[test]
+fn test_annotation_edge_weight_accumulates() {
+    let conn = setup();
+    queries::insert_annotation(&conn, "a1", Some("node"), Some("n1"), "note1", None, "fact", None, 1000).unwrap();
+    queries::insert_annotation(&conn, "a2", Some("node"), Some("n2"), "note2", None, "fact", None, 1000).unwrap();
+
+    queries::upsert_annotation_edge(&conn, "a1", "a2", "related", 1.0, 1000).unwrap();
+    queries::upsert_annotation_edge(&conn, "a1", "a2", "related", 0.5, 2000).unwrap();
+
+    let edges = queries::get_annotation_edges_from(&conn, "a1").unwrap();
+    assert_eq!(edges.len(), 1);
+    assert!((edges[0].weight - 1.5).abs() < f64::EPSILON);
+}
+
+#[test]
+fn test_annotation_edge_bidirectional_lookup() {
+    let conn = setup();
+    queries::insert_annotation(&conn, "a1", Some("node"), Some("n1"), "note1", None, "fact", None, 1000).unwrap();
+    queries::insert_annotation(&conn, "a2", Some("node"), Some("n2"), "note2", None, "fact", None, 1000).unwrap();
+
+    queries::upsert_annotation_edge(&conn, "a1", "a2", "related", 1.0, 1000).unwrap();
+
+    let from_a1 = queries::get_related_annotation_ids(&conn, "a1", 10).unwrap();
+    assert!(from_a1.contains(&"a2".to_string()));
+
+    let from_a2 = queries::get_related_annotation_ids(&conn, "a2", 10).unwrap();
+    assert!(from_a2.contains(&"a1".to_string()));
+}
+
+#[test]
+fn test_annotation_edge_cascade_delete() {
+    let conn = setup();
+    queries::insert_annotation(&conn, "a1", Some("node"), Some("n1"), "note1", None, "fact", None, 1000).unwrap();
+    queries::insert_annotation(&conn, "a2", Some("node"), Some("n2"), "note2", None, "fact", None, 1000).unwrap();
+    queries::upsert_annotation_edge(&conn, "a1", "a2", "related", 1.0, 1000).unwrap();
+
+    queries::delete_annotation_edges(&conn, "a1").unwrap();
+    let edges = queries::get_annotation_edges_from(&conn, "a1").unwrap();
+    assert_eq!(edges.len(), 0);
+    let related = queries::get_related_annotation_ids(&conn, "a2", 10).unwrap();
+    assert_eq!(related.len(), 0);
+}
+
+#[test]
+fn test_retrieval_count_increment() {
+    let conn = setup();
+    queries::insert_annotation(&conn, "a1", Some("node"), Some("n1"), "note", None, "fact", None, 1000).unwrap();
+    queries::insert_annotation(&conn, "a2", Some("node"), Some("n1"), "note2", None, "fact", None, 1000).unwrap();
+
+    queries::increment_retrieval_count(&conn, &["a1".to_string(), "a2".to_string()]).unwrap();
+    queries::increment_retrieval_count(&conn, &["a1".to_string()]).unwrap();
+
+    let anns = queries::get_annotations_for_anchor(&conn, "node", "n1").unwrap();
+    let a1 = anns.iter().find(|a| a.id == "a1").unwrap();
+    let a2 = anns.iter().find(|a| a.id == "a2").unwrap();
+    assert_eq!(a1.retrieval_count, 2);
+    assert_eq!(a2.retrieval_count, 1);
+}
+
+#[test]
+fn test_low_quality_annotations_query() {
+    let conn = setup();
+    queries::insert_annotation(&conn, "a1", Some("node"), Some("n1"), "low quality", None, "fact", None, 1000).unwrap();
+    queries::update_annotation_quality(&conn, "a1", -0.45).unwrap();
+    for _ in 0..12 {
+        queries::increment_retrieval_count(&conn, &["a1".to_string()]).unwrap();
+    }
+
+    let low = queries::get_low_quality_annotations(&conn, 0.1, 10).unwrap();
+    assert_eq!(low.len(), 1);
+    assert_eq!(low[0].id, "a1");
 }
 
 #[test]

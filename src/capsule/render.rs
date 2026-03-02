@@ -183,6 +183,9 @@ mod tests {
             change_significance: None,
             bm25_score: None,
             timestamp: None,
+            annotation_kind: None,
+            quality: None,
+            annotation_id: None,
         }
     }
 
@@ -246,6 +249,9 @@ mod tests {
             change_significance: None,
             bm25_score: None,
             timestamp: None,
+            annotation_kind: None,
+            quality: None,
+            annotation_id: None,
         }
     }
 
