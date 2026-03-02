@@ -82,7 +82,7 @@ fs2 = "0.4"
 # Terminal output
 owo-colors = "4"
 ratatui = "0.29"
-crossterm = "0.28"
+crossterm = "0.29"
 
 # Logging / observability
 tracing = "0.1"
