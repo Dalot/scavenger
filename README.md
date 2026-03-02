@@ -7,6 +7,12 @@ Terminal-first AST dependency graph and session memory engine for Claude Code CL
 Requires Rust 1.85+ (edition 2024).
 
 ```bash
+cargo install thescavenger
+```
+
+Or from a local checkout:
+
+```bash
 cargo install --path .
 ```
 
@@ -111,4 +117,9 @@ Set `NO_COLOR=1` for plain output. Use `--format=json` for machine-readable diag
 
 ## License
 
-MIT
+Licensed under either of
+
+- Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE) or <http://www.apache.org/licenses/LICENSE-2.0>)
+- MIT License ([LICENSE-MIT](LICENSE-MIT) or <http://opensource.org/licenses/MIT>)
+
+at your option.

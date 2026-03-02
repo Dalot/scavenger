@@ -25,12 +25,12 @@ pub async fn listen(
                         let state = state.clone();
                         tokio::spawn(async move {
                             if let Err(e) = handle_connection(stream, state).await {
-                                eprintln!("Connection handler error: {e}");
+                                tracing::debug!(error = %e, "connection handler error");
                             }
                         });
                     }
                     Err(e) => {
-                        eprintln!("Accept error: {e}");
+                        tracing::warn!(error = %e, "socket accept error");
                     }
                 }
             }

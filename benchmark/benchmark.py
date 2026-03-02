@@ -8,6 +8,9 @@ once WITHOUT Scavenger and once WITH, then compares cumulative metrics.
 This measures the compounding effect: session memory, graph context reuse,
 and reduced re-navigation over multiple related turns.
 
+Also captures Scavenger-side metrics (latency, effectiveness, pipeline timing)
+from the daemon via `scavenger stats --json` for comprehensive analysis.
+
 Prerequisites:
   curl https://cursor.com/install -fsS | bash
   agent login
@@ -26,6 +29,7 @@ import subprocess
 import sys
 import time
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 
 
@@ -72,11 +76,34 @@ class TurnMetrics:
 
 
 @dataclass
+class ScavengerMetrics:
+    """Daemon-side metrics captured via `scavenger stats --json`."""
+    capsule_latency_p50_us: int = 0
+    capsule_latency_p95_us: int = 0
+    capsule_latency_p99_us: int = 0
+    capsule_total: int = 0
+    capsule_empty: int = 0
+    empty_rate: float = 0.0
+    budget_utilization_avg: int = 0
+    tokens_saved: int = 0
+    savings_pct: float = 0.0
+    reindex_count: int = 0
+    reindex_p50_us: int = 0
+    pipeline_gather_avg_us: int = 0
+    pipeline_score_avg_us: int = 0
+    pipeline_render_avg_us: int = 0
+    effectiveness_score: float = 0.0
+    errors: int = 0
+    raw: dict = field(default_factory=dict)
+
+
+@dataclass
 class SessionMetrics:
     """Aggregated metrics across all turns in a session."""
     session_id: str = ""
     model: str = ""
     turns: list = field(default_factory=list)
+    scavenger: ScavengerMetrics = field(default_factory=ScavengerMetrics)
 
     def _sum(self, attr):
         return sum(getattr(t, attr) for t in self.turns)
@@ -284,6 +311,87 @@ def reset_project(project: str):
         pass
 
 
+def capture_scavenger_metrics(project: str) -> ScavengerMetrics:
+    """Query the daemon for current metrics via `scavenger stats --json`."""
+    sm = ScavengerMetrics()
+    try:
+        result = subprocess.run(
+            ["scavenger", "stats", "--json"],
+            cwd=project, capture_output=True, text=True, timeout=10,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            data = json.loads(result.stdout)
+            sm.raw = data
+
+            ts = data.get("token_savings", {})
+            sm.tokens_saved = ts.get("tokens_saved", 0)
+            sm.savings_pct = ts.get("savings_pct", 0.0)
+
+            dm = data.get("daemon", {})
+            if dm:
+                cap = dm.get("capsule", {})
+                sm.capsule_total = cap.get("total", 0)
+                sm.capsule_empty = cap.get("empty", 0)
+                sm.empty_rate = cap.get("empty_rate", 0.0)
+
+                lat = cap.get("latency_us", {})
+                sm.capsule_latency_p50_us = lat.get("p50", 0)
+                sm.capsule_latency_p95_us = lat.get("p95", 0)
+                sm.capsule_latency_p99_us = lat.get("p99", 0)
+
+                budget = cap.get("budget_utilization_pct", {})
+                sm.budget_utilization_avg = budget.get("avg", 0)
+
+                ri = dm.get("reindex", {})
+                sm.reindex_count = ri.get("count", 0)
+                sm.reindex_p50_us = ri.get("latency_us", {}).get("p50", 0)
+
+                pipe = dm.get("pipeline_us", {})
+                sm.pipeline_gather_avg_us = pipe.get("gather", {}).get("avg", 0)
+                sm.pipeline_score_avg_us = pipe.get("score", {}).get("avg", 0)
+                sm.pipeline_render_avg_us = pipe.get("render", {}).get("avg", 0)
+
+                sm.errors = dm.get("errors", 0)
+    except (FileNotFoundError, subprocess.TimeoutExpired, json.JSONDecodeError):
+        pass
+    return sm
+
+
+def run_health_gate(project: str):
+    """Pre-flight check: abort if scavenger is unhealthy."""
+    try:
+        result = subprocess.run(
+            ["scavenger", "doctor", "--format", "json"],
+            cwd=project, capture_output=True, text=True, timeout=10,
+        )
+        if result.returncode != 0:
+            data = json.loads(result.stdout) if result.stdout.strip() else {}
+            health = data.get("health_score", 0)
+            failed = [c["name"] for c in data.get("checks", []) if not c["passed"]]
+            print(f"\nHealth gate FAILED (score: {health}/100)")
+            for f in failed:
+                print(f"  - {f}")
+            print("\nFix issues before benchmarking. Run: scavenger doctor --verbose")
+            sys.exit(1)
+    except FileNotFoundError:
+        print("Warning: `scavenger` CLI not found — skipping health gate")
+    except (subprocess.TimeoutExpired, json.JSONDecodeError):
+        print("Warning: health gate check timed out — continuing")
+
+
+def auto_tag_session(project: str, session_id: str, label: str):
+    """Tag a session for easier identification."""
+    if not session_id:
+        return
+    try:
+        subprocess.run(
+            ["scavenger", "metrics", "tag", session_id, label],
+            cwd=project, capture_output=True, text=True, timeout=10,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        pass
+
+
 def run_session(prompts: list[str], cwd: str, condition: str,
                 approve_mcps: bool = False, model: str = None) -> SessionMetrics:
     """Run a full multi-turn session and return aggregated metrics."""
@@ -322,6 +430,14 @@ def fmt_tok(n: int) -> str:
     if n >= 1_000:
         return f"{n / 1_000:.1f}k"
     return str(n)
+
+
+def fmt_us(n: int) -> str:
+    if n >= 1_000_000:
+        return f"{n / 1_000_000:.1f}s"
+    if n >= 1_000:
+        return f"{n / 1_000:.1f}ms"
+    return f"{n}us"
 
 
 def delta_str(a: int, b: int) -> str:
@@ -424,6 +540,25 @@ def print_session_summary(without: SessionMetrics, with_s: SessionMetrics):
             row(t, without.all_mcp_calls.get(t, 0), with_s.all_mcp_calls.get(t, 0))
         lines.append("")
 
+    # Scavenger internals (WITH session only — WITHOUT has zeroes)
+    sm = with_s.scavenger
+    if sm.capsule_total > 0:
+        lines.append("SCAVENGER INTERNALS (daemon perspective)")
+        lines.append(f"  {'Capsule latency P50':<34s} {fmt_us(sm.capsule_latency_p50_us):>{w}s}")
+        lines.append(f"  {'Capsule latency P95':<34s} {fmt_us(sm.capsule_latency_p95_us):>{w}s}")
+        lines.append(f"  {'Capsule latency P99':<34s} {fmt_us(sm.capsule_latency_p99_us):>{w}s}")
+        lines.append(f"  {'Empty capsules':<34s} {f'{sm.capsule_empty}/{sm.capsule_total} ({sm.empty_rate*100:.0f}%)':>{w}s}")
+        lines.append(f"  {'Budget utilization':<34s} {f'{sm.budget_utilization_avg}%':>{w}s}")
+        lines.append(f"  {'Token savings':<34s} {f'{sm.savings_pct:.1f}%':>{w}s}")
+        lines.append(f"  {'Pipeline gather avg':<34s} {fmt_us(sm.pipeline_gather_avg_us):>{w}s}")
+        lines.append(f"  {'Pipeline score avg':<34s} {fmt_us(sm.pipeline_score_avg_us):>{w}s}")
+        lines.append(f"  {'Pipeline render avg':<34s} {fmt_us(sm.pipeline_render_avg_us):>{w}s}")
+        lines.append(f"  {'Reindex events':<34s} {f'{sm.reindex_count} (P50={fmt_us(sm.reindex_p50_us)})':>{w}s}")
+        lines.append(f"  {'Daemon errors':<34s} {sm.errors:>{w}d}")
+        if sm.effectiveness_score > 0:
+            lines.append(f"  {'Effectiveness score':<34s} {f'{sm.effectiveness_score:.2f}':>{w}s}")
+        lines.append("")
+
     errs = without.all_errors + with_s.all_errors
     if errs:
         lines.append("ERRORS")
@@ -433,6 +568,99 @@ def print_session_summary(without: SessionMetrics, with_s: SessionMetrics):
             lines.append(f"  [WITH] {e}")
 
     print("\n".join(lines))
+
+
+def export_json_results(
+    project: str,
+    prompts: list[str],
+    without: SessionMetrics,
+    with_s: SessionMetrics,
+    model: str,
+):
+    """Save full benchmark results as structured JSON."""
+    benchmarks_dir = Path(project) / ".scavenger" / "benchmarks"
+    benchmarks_dir.mkdir(parents=True, exist_ok=True)
+
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    out_path = benchmarks_dir / f"{timestamp}.json"
+
+    def serialize_session(s: SessionMetrics) -> dict:
+        return {
+            "session_id": s.session_id,
+            "model": s.model,
+            "num_turns": s.num_turns,
+            "total_duration_ms": s.total_duration_ms,
+            "total_tokens": s.total_tokens,
+            "total_input_tokens": s.total_input_tokens,
+            "total_output_tokens": s.total_output_tokens,
+            "total_tool_count": s.total_tool_count,
+            "total_navigation": s.total_navigation,
+            "total_file_reads": s.total_file_reads,
+            "total_file_edits": s.total_file_edits,
+            "total_capsule_calls": s.total_capsule_calls,
+            "tool_breakdown": s.all_tool_calls,
+            "mcp_breakdown": s.all_mcp_calls,
+            "errors": s.all_errors,
+            "turns": [
+                {
+                    "turn": t.turn,
+                    "prompt": t.prompt,
+                    "duration_ms": t.duration_ms,
+                    "input_tokens": t.input_tokens,
+                    "output_tokens": t.output_tokens,
+                    "tool_count": t.tool_count,
+                    "navigation_calls": t.navigation_calls,
+                    "capsule_calls": t.capsule_calls,
+                }
+                for t in s.turns
+            ],
+        }
+
+    def serialize_scavenger(sm: ScavengerMetrics) -> dict:
+        return {
+            "capsule_latency_p50_us": sm.capsule_latency_p50_us,
+            "capsule_latency_p95_us": sm.capsule_latency_p95_us,
+            "capsule_latency_p99_us": sm.capsule_latency_p99_us,
+            "capsule_total": sm.capsule_total,
+            "capsule_empty": sm.capsule_empty,
+            "empty_rate": sm.empty_rate,
+            "budget_utilization_avg": sm.budget_utilization_avg,
+            "tokens_saved": sm.tokens_saved,
+            "savings_pct": sm.savings_pct,
+            "effectiveness_score": sm.effectiveness_score,
+            "pipeline_gather_avg_us": sm.pipeline_gather_avg_us,
+            "pipeline_score_avg_us": sm.pipeline_score_avg_us,
+            "pipeline_render_avg_us": sm.pipeline_render_avg_us,
+            "reindex_count": sm.reindex_count,
+            "errors": sm.errors,
+        }
+
+    result = {
+        "timestamp": datetime.now().isoformat(),
+        "project": project,
+        "model": model or "default",
+        "prompts": prompts,
+        "without": serialize_session(without),
+        "with": serialize_session(with_s),
+        "scavenger_metrics": serialize_scavenger(with_s.scavenger),
+        "deltas": {
+            "tool_count_pct": _pct_change(without.total_tool_count, with_s.total_tool_count),
+            "navigation_pct": _pct_change(without.total_navigation, with_s.total_navigation),
+            "tokens_pct": _pct_change(without.total_tokens, with_s.total_tokens),
+            "duration_pct": _pct_change(without.total_duration_ms, with_s.total_duration_ms),
+        },
+    }
+
+    with open(out_path, "w") as f:
+        json.dump(result, f, indent=2)
+
+    print(f"\nResults exported to: {out_path}")
+
+
+def _pct_change(a: int, b: int) -> float:
+    if a > 0:
+        return round(((b - a) / a) * 100, 1)
+    return 0.0
 
 
 def main():
@@ -477,12 +705,16 @@ def main():
         print(f'{tag}"{p[:70]}{"..." if len(p) > 70 else ""}"')
     print()
 
+    # Pre-flight health check
+    run_health_gate(project)
+
     try:
         # --- WITHOUT Scavenger ---
         print("━━━ WITHOUT Scavenger ━━━")
         toggle_scavenger(project, enable=False)
         time.sleep(1)
         without = run_session(prompts, project, "WITHOUT", approve_mcps=False, model=args.model)
+        auto_tag_session(project, without.session_id, "benchmark-without")
         reset_project(project)
         print("  (project reset)")
 
@@ -493,6 +725,12 @@ def main():
         toggle_scavenger(project, enable=True)
         time.sleep(2)
         with_s = run_session(prompts, project, "WITH", approve_mcps=True, model=args.model)
+        auto_tag_session(project, with_s.session_id, "benchmark-with")
+
+        # Capture Scavenger-side metrics after the WITH session
+        print("  Capturing Scavenger daemon metrics...")
+        with_s.scavenger = capture_scavenger_metrics(project)
+
         reset_project(project)
         print("  (project reset)")
 
@@ -502,6 +740,9 @@ def main():
         if is_session:
             print_turn_timeline(without, with_s)
         print_session_summary(without, with_s)
+
+        # Export structured JSON
+        export_json_results(project, prompts, without, with_s, args.model)
 
     finally:
         reset_project(project)

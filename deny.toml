@@ -1,0 +1,34 @@
+[advisories]
+ignore = [
+    # time 0.3.47 fix requires Rust 1.88+, incompatible with our MSRV 1.85.
+    # Transitive dep via tracing-appender; scavenger never parses RFC 2822 user input.
+    { id = "RUSTSEC-2026-0009", reason = "fix requires Rust 1.88+, not exploitable in our usage" },
+    # instant is unmaintained, but it's a transitive dep from notify-types.
+    # No safe upgrade path until notify drops it upstream.
+    { id = "RUSTSEC-2024-0384", reason = "transitive dep from notify, no upgrade available" },
+]
+
+[licenses]
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "CC0-1.0",
+    "ISC",
+    "Unicode-3.0",
+    "Unlicense",
+    "Zlib",
+]
+confidence-threshold = 0.8
+
+[bans]
+multiple-versions = "warn"
+wildcards = "allow"
+
+[sources]
+unknown-registry = "warn"
+unknown-git = "warn"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []

@@ -6,6 +6,7 @@ mod db;
 mod graph;
 mod hooks;
 mod memory;
+mod observe;
 mod query;
 
 use clap::{Parser, Subcommand};
@@ -88,9 +89,12 @@ enum Commands {
         /// Output format
         #[arg(long, default_value = "human")]
         format: OutputFormat,
+        /// Watch mode: re-check every N seconds
+        #[arg(long)]
+        watch: Option<u64>,
     },
 
-    /// Show token savings statistics
+    /// Show token savings and operational metrics
     Stats {
         /// Filter by session
         #[arg(long)]
@@ -98,6 +102,9 @@ enum Commands {
         /// Filter by branch
         #[arg(long)]
         branch: Option<String>,
+        /// Output as JSON (for programmatic consumption)
+        #[arg(long)]
+        json: bool,
     },
 
     /// Manage federated repositories
@@ -133,6 +140,29 @@ enum Commands {
 
     /// Start the MCP bridge (stdio JSON-RPC server for Claude Code / Cursor)
     McpBridge,
+
+    /// Live observability dashboard (TUI)
+    Observe {
+        /// Refresh interval in seconds
+        #[arg(long, default_value = "2")]
+        interval: u64,
+    },
+
+    /// View daemon logs with filtering
+    Logs {
+        /// Follow the log in real-time (like tail -f)
+        #[arg(long, short)]
+        follow: bool,
+        /// Filter by minimum log level (trace, debug, info, warn, error)
+        #[arg(long, default_value = "info")]
+        level: String,
+        /// Filter by span/method name (e.g. "capsule", "reindex", "hook_post")
+        #[arg(long)]
+        method: Option<String>,
+        /// Number of recent lines to show (default: 50)
+        #[arg(long, short, default_value = "50")]
+        lines: usize,
+    },
 }
 
 #[derive(Subcommand)]
@@ -255,14 +285,16 @@ fn main() {
         Commands::Graph { command } => cmd_graph(command),
         Commands::Annotate { symbol, text, tags } => cmd_annotate(symbol, text, tags),
         Commands::MergeAnnotations { branch } => cmd_merge_annotations(branch),
-        Commands::Doctor { verbose, format } => cmd_doctor(verbose, format),
-        Commands::Stats { session, branch } => cmd_stats(session, branch),
+        Commands::Doctor { verbose, format, watch } => cmd_doctor(verbose, format, watch),
+        Commands::Stats { session, branch, json } => cmd_stats(session, branch, json),
         Commands::Federate { command } => cmd_federate(command),
         Commands::Hook { command } => cmd_hook(command),
         Commands::Metrics { command } => cmd_metrics(command),
         Commands::Clean { purge } => cmd_clean(purge),
         Commands::Db { command } => cmd_db(command),
         Commands::McpBridge => cmd_mcp_bridge(),
+        Commands::Observe { interval } => cmd_observe(interval),
+        Commands::Logs { follow, level, method, lines } => cmd_logs(follow, level, method, lines),
     };
 
     if let Err(e) = result {
@@ -568,12 +600,26 @@ fn cmd_merge_annotations(branch: String) -> Result<(), Box<dyn std::error::Error
     Ok(())
 }
 
-fn cmd_doctor(_verbose: bool, format: OutputFormat) -> Result<(), Box<dyn std::error::Error>> {
+fn cmd_doctor(verbose: bool, format: OutputFormat, watch: Option<u64>) -> Result<(), Box<dyn std::error::Error>> {
+    if let Some(interval) = watch {
+        loop {
+            // Clear screen
+            print!("\x1B[2J\x1B[H");
+            run_doctor_once(verbose, &format)?;
+            std::thread::sleep(std::time::Duration::from_secs(interval));
+        }
+    } else {
+        run_doctor_once(verbose, &format)
+    }
+}
+
+fn run_doctor_once(verbose: bool, format: &OutputFormat) -> Result<(), Box<dyn std::error::Error>> {
     let project_root = std::env::current_dir()?;
     let scavenger_dir = db::scavenger_dir(&project_root);
     let no_color = std::env::var("NO_COLOR").is_ok();
 
     let mut checks: Vec<DiagCheck> = Vec::new();
+    let mut recommendations: Vec<String> = Vec::new();
 
     // Process checks
     let pid_path = scavenger_dir.join("daemon.pid");
@@ -585,14 +631,23 @@ fn cmd_doctor(_verbose: bool, format: OutputFormat) -> Result<(), Box<dyn std::e
         false
     };
     checks.push(DiagCheck::new("Daemon process", "Process", pid_alive));
+    if !pid_alive {
+        recommendations.push("Start the daemon: scavenger daemon (or trigger via session hook)".into());
+    }
     checks.push(DiagCheck::new("PID file", "Process", pid_path.exists()));
 
     let sock = scavenger_dir.join("daemon.sock");
     checks.push(DiagCheck::new("Socket accessible", "Process", sock.exists()));
+    if pid_alive && !sock.exists() {
+        recommendations.push("Socket missing despite running daemon — restart: scavenger hook session-end && scavenger daemon".into());
+    }
 
     // Config check
     let config_ok = config::Config::load(&project_root).is_ok();
     checks.push(DiagCheck::new("Config valid", "Config", config_ok));
+    if !config_ok {
+        recommendations.push("Fix or regenerate scavenger.toml: scavenger init".into());
+    }
 
     // DB integrity
     let branch = daemon::detect_branch(&project_root);
@@ -603,11 +658,17 @@ fn cmd_doctor(_verbose: bool, format: OutputFormat) -> Result<(), Box<dyn std::e
         false
     };
     checks.push(DiagCheck::new("DB integrity", "FileIntegrity", db_ok));
+    if !db_ok {
+        recommendations.push("Database may be corrupt — re-index: scavenger index".into());
+    }
 
     // Plugin check
     let plugin = hooks::register::plugin_dir(&project_root);
     let hooks_ok = plugin.join("hooks/hooks.json").exists();
     checks.push(DiagCheck::new("Plugin hooks", "Dependencies", hooks_ok));
+    if !hooks_ok {
+        recommendations.push("Plugin hooks missing — run: scavenger init".into());
+    }
 
     // .scavenger dir exists
     checks.push(DiagCheck::new("Initialized", "FileIntegrity", scavenger_dir.exists()));
@@ -617,9 +678,76 @@ fn cmd_doctor(_verbose: bool, format: OutputFormat) -> Result<(), Box<dyn std::e
     let branch_db = scavenger_dir.join("indexes").join(format!("{sanitized}.db"));
     checks.push(DiagCheck::new("Branch DB exists", "FileIntegrity", branch_db.exists()));
 
+    // Log analysis (parse recent daemon logs for error patterns)
+    let mut log_errors = 0u32;
+    let mut log_warnings = 0u32;
+    let mut empty_capsules = 0u32;
+    let mut total_capsules = 0u32;
+
+    let mut log_files: Vec<_> = std::fs::read_dir(&scavenger_dir)
+        .into_iter()
+        .flatten()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_name().to_string_lossy().starts_with("daemon.log"))
+        .collect();
+    log_files.sort_by_key(|e| std::cmp::Reverse(e.metadata().ok().and_then(|m| m.modified().ok())));
+
+    if let Some(log_file) = log_files.first() {
+        let content = std::fs::read_to_string(log_file.path()).unwrap_or_default();
+        for line in content.lines().rev().take(500) {
+            if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(line) {
+                let level = parsed.get("level").and_then(|v| v.as_str()).unwrap_or("");
+                match level {
+                    "ERROR" => log_errors += 1,
+                    "WARN" => log_warnings += 1,
+                    _ => {}
+                }
+                if let Some(fields) = parsed.get("fields").and_then(|v| v.as_object()) {
+                    if fields.get("message").and_then(|v| v.as_str()) == Some("capsule served") {
+                        total_capsules += 1;
+                        if fields.get("empty").and_then(|v| v.as_bool()) == Some(true) {
+                            empty_capsules += 1;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    let log_health = log_errors == 0;
+    checks.push(DiagCheck::new("No recent errors in logs", "Logs", log_health));
+    if log_errors > 0 {
+        recommendations.push(format!("{log_errors} errors in recent logs — run: scavenger logs --level error"));
+    }
+
+    let empty_rate_ok = total_capsules == 0 || (empty_capsules as f64 / total_capsules as f64) < 0.5;
+    checks.push(DiagCheck::new("Empty capsule rate < 50%", "Effectiveness", empty_rate_ok));
+    if !empty_rate_ok {
+        recommendations.push(format!(
+            "High empty capsule rate ({empty_capsules}/{total_capsules}) — ensure files are indexed: scavenger index"
+        ));
+    }
+
+    // Daemon metrics (if available)
+    let daemon_metrics = fetch_daemon_metrics(&scavenger_dir);
+    let mut latency_ok = true;
+    if let Some(ref dm) = daemon_metrics {
+        let p99 = dm.pointer("/capsule/latency_us/p99").and_then(|v| v.as_u64()).unwrap_or(0);
+        latency_ok = p99 < 5_000_000; // 5 seconds
+        checks.push(DiagCheck::new("Capsule P99 < 5s", "Performance", latency_ok));
+        if !latency_ok {
+            recommendations.push(format!("Capsule P99 latency is {p99}us — check graph size and DB performance"));
+        }
+    }
+
+    // Composite health score (0-100)
+    let passed = checks.iter().filter(|c| c.passed).count();
+    let total = checks.len();
+    let health_score = (passed as f64 / total as f64 * 100.0).round() as u32;
+
     match format {
         OutputFormat::Json => {
-            let results: Vec<serde_json::Value> = checks
+            let check_results: Vec<serde_json::Value> = checks
                 .iter()
                 .map(|c| {
                     serde_json::json!({
@@ -629,10 +757,29 @@ fn cmd_doctor(_verbose: bool, format: OutputFormat) -> Result<(), Box<dyn std::e
                     })
                 })
                 .collect();
-            println!("{}", serde_json::to_string_pretty(&results)?);
+            let result = serde_json::json!({
+                "health_score": health_score,
+                "checks": check_results,
+                "recommendations": recommendations,
+                "log_analysis": {
+                    "errors": log_errors,
+                    "warnings": log_warnings,
+                    "total_capsules": total_capsules,
+                    "empty_capsules": empty_capsules,
+                },
+            });
+            println!("{}", serde_json::to_string_pretty(&result)?);
         }
         OutputFormat::Human => {
-            println!("Scavenger Health Check\n");
+            let score_str = format!("{health_score}/100");
+            if health_score >= 80 {
+                println!("Scavenger Health: {}\n", score_str.green().bold());
+            } else if health_score >= 50 {
+                println!("Scavenger Health: {}\n", score_str.yellow().bold());
+            } else {
+                println!("Scavenger Health: {}\n", score_str.red().bold());
+            }
+
             for c in &checks {
                 let icon = if c.passed {
                     if no_color { "[OK]" } else { "\u{2714}" }
@@ -647,9 +794,29 @@ fn cmd_doctor(_verbose: bool, format: OutputFormat) -> Result<(), Box<dyn std::e
                     println!("  {} {}", icon.red(), c.name);
                 }
             }
-            let passed = checks.iter().filter(|c| c.passed).count();
-            let total = checks.len();
+
             println!("\n{passed}/{total} checks passed");
+
+            if verbose {
+                println!();
+                println!("{}", "Log Analysis (last 500 entries)".bold());
+                println!("{}", "─".repeat(40));
+                println!("  Errors:    {log_errors}");
+                println!("  Warnings:  {log_warnings}");
+                if total_capsules > 0 {
+                    let erate = empty_capsules as f64 / total_capsules as f64 * 100.0;
+                    println!("  Capsules:  {total_capsules} ({empty_capsules} empty, {erate:.0}%)");
+                }
+            }
+
+            if !recommendations.is_empty() {
+                println!();
+                println!("{}", "Recommendations".bold());
+                println!("{}", "─".repeat(40));
+                for r in &recommendations {
+                    println!("  - {r}");
+                }
+            }
         }
     }
 
@@ -675,6 +842,7 @@ impl DiagCheck {
 fn cmd_stats(
     session_filter: Option<String>,
     branch_filter: Option<String>,
+    json_output: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let project_root = std::env::current_dir()?;
     let scavenger_dir = db::scavenger_dir(&project_root);
@@ -718,28 +886,104 @@ fn cmd_stats(
         0.0
     };
 
-    println!("Token Savings Report");
-    println!("====================");
-    if let Some(ref s) = session_filter {
-        println!("Session: {s}");
-    }
-    if let Some(ref b) = branch_filter {
-        println!("Branch: {b}");
-    }
-    println!();
-    println!("Total tool calls:      {total_calls}");
-    println!("Tokens served (actual): {total_actual}");
-    println!("Tokens without index:   {total_estimated}");
-    println!("Savings:                {savings:.1}%");
+    // Fetch live daemon metrics if available
+    let daemon_metrics = fetch_daemon_metrics(&scavenger_dir);
 
+    if json_output {
+        let mut result = serde_json::json!({
+            "token_savings": {
+                "total_calls": total_calls,
+                "tokens_actual": total_actual,
+                "tokens_estimated": total_estimated,
+                "savings_pct": (savings * 10.0).round() / 10.0,
+                "tokens_saved": total_estimated - total_actual,
+            },
+        });
+        if let Some(dm) = daemon_metrics {
+            result["daemon"] = dm;
+        }
+        println!("{}", serde_json::to_string_pretty(&result)?);
+        return Ok(());
+    }
+
+    println!("{}", "Token Savings".bold());
+    println!("{}", "─".repeat(50));
+    println!("  Capsule calls:      {total_calls}");
+    if total_calls > 0 {
+        let avg_actual = total_actual / total_calls;
+        println!("  Tokens served:      {total_actual}  (avg {avg_actual}/call)");
+    } else {
+        println!("  Tokens served:      {total_actual}");
+    }
+    println!("  Tokens without idx: {total_estimated}");
+    println!("  Savings:            {savings:.1}%");
     if total_estimated > 0 {
-        println!(
-            "Tokens saved:           {}",
-            total_estimated - total_actual
-        );
+        println!("  Tokens saved:       {}", total_estimated - total_actual);
+    }
+
+    if let Some(dm) = daemon_metrics {
+        println!();
+        println!("{}", "Performance (live daemon)".bold());
+        println!("{}", "─".repeat(50));
+        if let Some(cap) = dm.get("capsule") {
+            let lat = cap.get("latency_us").unwrap_or(&serde_json::Value::Null);
+            let p50 = lat.get("p50").and_then(|v| v.as_u64()).unwrap_or(0);
+            let p95 = lat.get("p95").and_then(|v| v.as_u64()).unwrap_or(0);
+            let p99 = lat.get("p99").and_then(|v| v.as_u64()).unwrap_or(0);
+            println!("  Capsule latency:    P50={}us  P95={}us  P99={}us", p50, p95, p99);
+
+            let empty = cap.get("empty").and_then(|v| v.as_u64()).unwrap_or(0);
+            let total = cap.get("total").and_then(|v| v.as_u64()).unwrap_or(0);
+            if total > 0 {
+                let empty_pct = empty as f64 / total as f64 * 100.0;
+                println!("  Empty capsules:     {empty} / {total} ({empty_pct:.1}%)");
+            }
+
+            let budget = cap.get("budget_utilization_pct").unwrap_or(&serde_json::Value::Null);
+            let avg_util = budget.get("avg").and_then(|v| v.as_u64()).unwrap_or(0);
+            println!("  Budget utilization: {avg_util}% avg");
+        }
+
+        if let Some(reindex) = dm.get("reindex") {
+            let count = reindex.get("count").and_then(|v| v.as_u64()).unwrap_or(0);
+            let lat = reindex.get("latency_us").unwrap_or(&serde_json::Value::Null);
+            let p50 = lat.get("p50").and_then(|v| v.as_u64()).unwrap_or(0);
+            if count > 0 {
+                println!("  Reindex:            {count} events (P50={p50}us)");
+            }
+        }
+
+        if let Some(graph) = dm.get("graph") {
+            let nodes = graph.get("nodes").and_then(|v| v.as_u64()).unwrap_or(0);
+            let edges = graph.get("edges").and_then(|v| v.as_u64()).unwrap_or(0);
+            println!();
+            println!("{}", "Graph".bold());
+            println!("{}", "─".repeat(50));
+            println!("  Nodes: {nodes}  Edges: {edges}");
+        }
+
+        let uptime = dm.get("uptime_secs").and_then(|v| v.as_u64()).unwrap_or(0);
+        let errors = dm.get("errors").and_then(|v| v.as_u64()).unwrap_or(0);
+        println!();
+        println!("{}", "Daemon".bold());
+        println!("{}", "─".repeat(50));
+        println!("  Uptime: {}s  Errors: {errors}", uptime);
+    } else {
+        println!();
+        eprintln!("  (daemon not running — operational metrics unavailable)");
     }
 
     Ok(())
+}
+
+fn fetch_daemon_metrics(scavenger_dir: &std::path::Path) -> Option<serde_json::Value> {
+    let socket_path = scavenger_dir.join("daemon.sock");
+    if !socket_path.exists() {
+        return None;
+    }
+    let rt = tokio::runtime::Runtime::new().ok()?;
+    let request = serde_json::json!({ "method": "metrics" });
+    rt.block_on(daemon::socket::send_request(&socket_path, &request)).ok()
 }
 
 fn cmd_federate(command: FederateCommands) -> Result<(), Box<dyn std::error::Error>> {
@@ -1223,6 +1467,158 @@ fn cmd_mcp_bridge() -> Result<(), Box<dyn std::error::Error>> {
 
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(bridge::run_mcp_bridge(scavenger_dir))
+}
+
+fn cmd_observe(interval: u64) -> Result<(), Box<dyn std::error::Error>> {
+    let project_root = std::env::current_dir()?;
+    let scavenger_dir = db::scavenger_dir(&project_root);
+    if !scavenger_dir.exists() {
+        return Err("Not initialized. Run `scavenger init` first.".into());
+    }
+    observe::run(&scavenger_dir, interval)
+}
+
+fn cmd_logs(
+    follow: bool,
+    level_filter: String,
+    method_filter: Option<String>,
+    max_lines: usize,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let project_root = std::env::current_dir()?;
+    let scavenger_dir = db::scavenger_dir(&project_root);
+
+    let log_dir = &scavenger_dir;
+    let mut log_files: Vec<_> = std::fs::read_dir(log_dir)?
+        .filter_map(|e| e.ok())
+        .filter(|e| {
+            e.file_name()
+                .to_string_lossy()
+                .starts_with("daemon.log")
+        })
+        .collect();
+
+    if log_files.is_empty() {
+        eprintln!("No daemon log files found in {}", log_dir.display());
+        return Ok(());
+    }
+
+    log_files.sort_by_key(|e| std::cmp::Reverse(e.metadata().ok().and_then(|m| m.modified().ok())));
+
+    let level_num = match level_filter.to_lowercase().as_str() {
+        "trace" => 0,
+        "debug" => 1,
+        "info" => 2,
+        "warn" => 3,
+        "error" => 4,
+        _ => 2,
+    };
+
+    let format_line = |line: &str| -> Option<String> {
+        let parsed: serde_json::Value = serde_json::from_str(line).ok()?;
+
+        let log_level = parsed.get("level")
+            .and_then(|v| v.as_str())
+            .unwrap_or("INFO");
+        let line_level_num = match log_level.to_uppercase().as_str() {
+            "TRACE" => 0, "DEBUG" => 1, "INFO" => 2, "WARN" => 3, "ERROR" => 4, _ => 2,
+        };
+        if line_level_num < level_num {
+            return None;
+        }
+
+        if let Some(ref method) = method_filter {
+            let span_str = parsed.get("span")
+                .or_else(|| parsed.get("spans"))
+                .map(|v| v.to_string())
+                .unwrap_or_default();
+            let target = parsed.get("target").and_then(|v| v.as_str()).unwrap_or("");
+            let message = parsed.get("fields").and_then(|f| f.get("message")).and_then(|v| v.as_str()).unwrap_or("");
+            if !span_str.contains(method) && !target.contains(method) && !message.contains(method) {
+                return None;
+            }
+        }
+
+        let ts = parsed.get("timestamp")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        let ts_short = if ts.len() > 19 { &ts[11..19] } else { ts };
+
+        let fields = parsed.get("fields")
+            .and_then(|v| v.as_object());
+        let message = fields
+            .and_then(|f| f.get("message"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+
+        let mut extra_fields = String::new();
+        if let Some(f) = fields {
+            for (k, v) in f {
+                if k == "message" { continue; }
+                if !extra_fields.is_empty() { extra_fields.push_str(", "); }
+                extra_fields.push_str(&format!("{k}={v}"));
+            }
+        }
+
+        let level_colored = match log_level.to_uppercase().as_str() {
+            "ERROR" => format!("{}", log_level.red().bold()),
+            "WARN" => format!("{}", log_level.yellow()),
+            "INFO" => format!("{}", log_level.green()),
+            "DEBUG" => format!("{}", log_level.blue()),
+            _ => log_level.to_string(),
+        };
+
+        if extra_fields.is_empty() {
+            Some(format!("{ts_short} {level_colored:<5} {message}"))
+        } else {
+            Some(format!("{ts_short} {level_colored:<5} {message}  {}", extra_fields.dimmed()))
+        }
+    };
+
+    // Read and display recent lines
+    let log_path = log_files[0].path();
+    let content = std::fs::read_to_string(&log_path).unwrap_or_default();
+    let all_lines: Vec<&str> = content.lines().collect();
+    let start = all_lines.len().saturating_sub(max_lines * 3); // read extra to account for filtering
+    let mut displayed = 0;
+    let mut output_lines = Vec::new();
+    for line in &all_lines[start..] {
+        if let Some(formatted) = format_line(line) {
+            output_lines.push(formatted);
+        }
+    }
+    let skip = output_lines.len().saturating_sub(max_lines);
+    for line in &output_lines[skip..] {
+        println!("{line}");
+        displayed += 1;
+    }
+    if displayed == 0 {
+        eprintln!("No log entries match the filter.");
+    }
+
+    if follow {
+        use std::io::BufRead;
+        let file = std::fs::File::open(&log_path)?;
+        let mut reader = std::io::BufReader::new(file);
+        reader.seek_relative(content.len() as i64)?;
+        eprintln!("{}", "--- following log (Ctrl+C to stop) ---".dimmed());
+        let mut line_buf = String::new();
+        loop {
+            line_buf.clear();
+            match reader.read_line(&mut line_buf) {
+                Ok(0) => {
+                    std::thread::sleep(std::time::Duration::from_millis(200));
+                }
+                Ok(_) => {
+                    if let Some(formatted) = format_line(line_buf.trim()) {
+                        println!("{formatted}");
+                    }
+                }
+                Err(_) => break,
+            }
+        }
+    }
+
+    Ok(())
 }
 
 /// Print a table with adaptive column widths.

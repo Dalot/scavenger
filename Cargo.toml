@@ -1,10 +1,15 @@
 [package]
-name = "scavenger"
+name = "thescavenger"
 version = "0.1.1"
 edition = "2024"
 rust-version = "1.85"
 description = "Terminal-first AST dependency graph and session memory engine for Claude Code"
-license = "MIT"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/Dalot/scavenger"
+readme = "README.md"
+keywords = ["ast", "dependency-graph", "claude", "code-intelligence", "tree-sitter"]
+categories = ["command-line-utilities", "development-tools"]
+exclude = ["benchmark/", "scripts/", "specs/", ".cx-spec/", "tests/fixtures/", ".rdalot/"]
 
 [lib]
 name = "scavenger"
@@ -76,16 +81,29 @@ fs2 = "0.4"
 
 # Terminal output
 owo-colors = "4"
+ratatui = "0.29"
+crossterm = "0.28"
 
-# Logging
+# Logging / observability
 tracing = "0.1"
-tracing-subscriber = "0.3"
+tracing-subscriber = { version = "0.3", features = ["json", "env-filter"] }
+tracing-appender = "0.2"
 
 # Misc
 uuid = { version = "1", features = ["v4"] }
 chrono = "0.4"
 thiserror = "2"
 libc = "0.2.182"
+
+# OpenTelemetry (behind feature flag)
+opentelemetry = { version = "0.27", optional = true }
+opentelemetry_sdk = { version = "0.27", features = ["rt-tokio"], optional = true }
+opentelemetry-otlp = { version = "0.27", features = ["tonic"], optional = true }
+tracing-opentelemetry = { version = "0.28", optional = true }
+
+[features]
+default = []
+telemetry = ["opentelemetry", "opentelemetry_sdk", "opentelemetry-otlp", "tracing-opentelemetry"]
 
 [dev-dependencies]
 tempfile = "3"

@@ -81,13 +81,18 @@ pub fn assemble(
     query_result: &QueryResult,
     budget_override: Option<u32>,
 ) -> CapsuleResult {
+    use std::time::Instant;
+
     let raw_budget = budget_override.unwrap_or(config.budget.default);
-    let effective_budget = (raw_budget as f64 * 0.9) as u32; // 10% headroom
+    let effective_budget = (raw_budget as f64 * 0.9) as u32;
 
     // Stage 1: GATHER
+    let t0 = Instant::now();
     let mut candidates = gather::gather(conn, graph, config, query_result);
+    let gather_us = t0.elapsed().as_micros() as u64;
 
     if candidates.is_empty() {
+        tracing::debug!(gather_us, "capsule pipeline: empty after gather");
         return CapsuleResult {
             text: String::new(),
             token_count: 0,
@@ -95,7 +100,10 @@ pub fn assemble(
         };
     }
 
+    let gathered_count = candidates.len();
+
     // Stage 2: SCORE
+    let t1 = Instant::now();
     let bm25_scores: Vec<(NodeId, f64)> = query_result
         .search_results
         .iter()
@@ -108,14 +116,21 @@ pub fn assemble(
         query_result.target.as_ref(),
         &bm25_scores,
     );
+    let score_us = t1.elapsed().as_micros() as u64;
 
     // Stage 3: PIN
+    let t2 = Instant::now();
     render::pin(&mut candidates);
+    let pinned_count = candidates.iter().filter(|c| c.pinned).count();
+    let pin_us = t2.elapsed().as_micros() as u64;
 
     // Stage 4: TRIM
+    let t3 = Instant::now();
+    let pre_trim = candidates.len();
     render::trim(&mut candidates, effective_budget);
+    let dropped_count = pre_trim - candidates.len();
+    let trim_us = t3.elapsed().as_micros() as u64;
 
-    // Bump retrieval_count for annotations that survived trimming
     let annotation_ids: Vec<String> = candidates
         .iter()
         .filter(|c| c.source == CandidateSource::Annotation)
@@ -128,9 +143,12 @@ pub fn assemble(
     let items_included = candidates.len();
 
     // Stage 5: GROUP
+    let t4 = Instant::now();
     render::group(&mut candidates);
+    let group_us = t4.elapsed().as_micros() as u64;
 
     // Stage 6: RENDER
+    let t5 = Instant::now();
     let remaining = effective_budget.saturating_sub(
         candidates.iter().map(|c| c.token_count).sum::<u32>(),
     );
@@ -147,6 +165,29 @@ pub fn assemble(
 
     let text = render::render(&candidates, remaining, target_body.as_ref());
     let token_count = (text.len() / 4) as u32;
+    let render_us = t5.elapsed().as_micros() as u64;
+
+    let budget_utilization = if effective_budget > 0 {
+        token_count as f64 / effective_budget as f64
+    } else {
+        0.0
+    };
+
+    tracing::debug!(
+        gathered_count,
+        pinned_count,
+        dropped_count,
+        items_included,
+        token_count,
+        budget_utilization = format!("{:.2}", budget_utilization),
+        gather_us,
+        score_us,
+        pin_us,
+        trim_us,
+        group_us,
+        render_us,
+        "capsule pipeline complete"
+    );
 
     CapsuleResult {
         text,

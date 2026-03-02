@@ -6,4 +6,5 @@ pub mod db;
 pub mod graph;
 pub mod hooks;
 pub mod memory;
+pub mod observe;
 pub mod query;

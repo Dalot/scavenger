@@ -46,8 +46,10 @@ pub fn ensure_daemon_meta_schema(conn: &Connection) -> DbResult<()> {
         current = 1;
     }
 
-    // daemon_meta has no V2 changes yet, but the pattern is in place
-    let _ = current;
+    if current == 1 {
+        migrate_daemon_meta_v1_to_v2(conn)?;
+        conn.pragma_update(None, "user_version", 2)?;
+    }
 
     Ok(())
 }
@@ -64,6 +66,33 @@ fn migrate_v1_to_v2(conn: &Connection) -> DbResult<()> {
 
 fn create_daemon_meta_schema_v1(conn: &Connection) -> DbResult<()> {
     conn.execute_batch(DAEMON_META_SCHEMA_V1)?;
+    Ok(())
+}
+
+fn migrate_daemon_meta_v1_to_v2(conn: &Connection) -> DbResult<()> {
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS metrics_snapshots (
+            id        INTEGER PRIMARY KEY,
+            timestamp INTEGER NOT NULL,
+            json_blob TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_metrics_snap_ts ON metrics_snapshots(timestamp);
+
+        CREATE TABLE IF NOT EXISTS capsule_log (
+            capsule_id     TEXT PRIMARY KEY,
+            timestamp      INTEGER NOT NULL,
+            session_id     TEXT,
+            file           TEXT,
+            symbol         TEXT,
+            intent         TEXT,
+            tokens_served  INTEGER,
+            items_included INTEGER,
+            sections       TEXT,
+            total_us       INTEGER
+        );
+        CREATE INDEX IF NOT EXISTS idx_capsule_log_ts ON capsule_log(timestamp);
+        CREATE INDEX IF NOT EXISTS idx_capsule_log_session ON capsule_log(session_id, timestamp);",
+    )?;
     Ok(())
 }
 

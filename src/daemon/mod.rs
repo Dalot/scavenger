@@ -1,50 +1,96 @@
 pub mod coordinator;
+pub mod effectiveness;
 pub mod federation;
 pub mod handlers;
+pub mod metrics;
 pub mod socket;
 pub mod watcher;
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use parking_lot::{Mutex, RwLock};
 use tokio::signal;
 use tokio::sync::watch;
+use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
 use crate::config::Config;
 use crate::db;
 use crate::db::queries;
 use crate::graph::{self, SharedGraph};
 
-/// Structured JSON daemon log with size-based rotation (10 MB max, 2 rotated files).
-pub fn daemon_log(scavenger_dir: &Path, event: &str, detail: &serde_json::Value) {
-    let log_path = scavenger_dir.join("daemon.log");
-    let max_size: u64 = 10 * 1024 * 1024; // 10 MB
+/// Global request counter for generating lightweight request IDs.
+static REQUEST_COUNTER: AtomicU64 = AtomicU64::new(1);
 
-    // Rotate if needed
-    if let Ok(meta) = std::fs::metadata(&log_path) {
-        if meta.len() > max_size {
-            let log1 = scavenger_dir.join("daemon.log.1");
-            let log2 = scavenger_dir.join("daemon.log.2");
-            let _ = std::fs::rename(&log1, &log2);
-            let _ = std::fs::rename(&log_path, &log1);
-        }
+pub fn next_request_id() -> u64 {
+    REQUEST_COUNTER.fetch_add(1, Ordering::Relaxed)
+}
+
+/// Initialize the tracing subscriber with two layers:
+/// - JSON file layer -> .scavenger/daemon.log (daily rotation)
+/// - Compact stderr layer for foreground daemon mode
+/// - (optional, `telemetry` feature) OpenTelemetry OTLP export layer
+///
+/// Log level controlled by SCAVENGER_LOG env var (default: info).
+pub fn init_tracing(scavenger_dir: &Path) {
+    let file_appender = tracing_appender::rolling::daily(scavenger_dir, "daemon.log");
+
+    let file_layer = fmt::layer()
+        .json()
+        .with_writer(file_appender)
+        .with_target(true)
+        .with_span_events(fmt::format::FmtSpan::CLOSE);
+
+    let stderr_layer = fmt::layer()
+        .with_writer(std::io::stderr)
+        .with_target(false)
+        .compact();
+
+    let filter = EnvFilter::try_from_env("SCAVENGER_LOG")
+        .unwrap_or_else(|_| EnvFilter::new("scavenger=info"));
+
+    #[cfg(feature = "telemetry")]
+    {
+        use opentelemetry::trace::TracerProvider;
+        use opentelemetry_otlp::SpanExporter;
+        use tracing_opentelemetry::OpenTelemetryLayer;
+
+        let exporter = match SpanExporter::builder().with_tonic().build() {
+            Ok(e) => e,
+            Err(e) => {
+                eprintln!("OpenTelemetry exporter init failed: {e}");
+                tracing_subscriber::registry()
+                    .with(filter)
+                    .with(file_layer)
+                    .with(stderr_layer)
+                    .init();
+                return;
+            }
+        };
+
+        let provider = opentelemetry_sdk::trace::TracerProvider::builder()
+            .with_batch_exporter(exporter, opentelemetry_sdk::runtime::Tokio)
+            .build();
+
+        let tracer = provider.tracer("scavenger");
+        let otel_layer = OpenTelemetryLayer::new(tracer);
+
+        tracing_subscriber::registry()
+            .with(filter)
+            .with(file_layer)
+            .with(stderr_layer)
+            .with(otel_layer)
+            .init();
     }
 
-    let entry = serde_json::json!({
-        "timestamp": chrono::Utc::now().to_rfc3339(),
-        "event": event,
-        "pid": std::process::id(),
-        "detail": detail,
-    });
-
-    if let Ok(mut file) = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&log_path)
+    #[cfg(not(feature = "telemetry"))]
     {
-        use std::io::Write;
-        let _ = writeln!(file, "{}", entry);
+        tracing_subscriber::registry()
+            .with(filter)
+            .with(file_layer)
+            .with(stderr_layer)
+            .init();
     }
 }
 
@@ -59,6 +105,7 @@ pub struct DaemonState {
     pub current_branch: Arc<RwLock<String>>,
     pub session_id: Arc<RwLock<String>>,
     pub reindex_state: Arc<RwLock<ReindexState>>,
+    pub metrics: Arc<metrics::DaemonMetrics>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -84,6 +131,9 @@ impl std::fmt::Display for ReindexState {
 pub async fn run_daemon(project_root: PathBuf) -> Result<(), Box<dyn std::error::Error>> {
     let scavenger_dir = db::scavenger_dir(&project_root);
     let config = Config::load(&project_root)?;
+
+    // Initialize tracing before anything else
+    init_tracing(&scavenger_dir);
 
     // Step 1: Acquire exclusive flock
     let lock_path = scavenger_dir.join("daemon.lock");
@@ -113,8 +163,6 @@ pub async fn run_daemon(project_root: PathBuf) -> Result<(), Box<dyn std::error:
     // Step 5: Open per-branch index DB
     let branch_conn = db::open_branch_db(&scavenger_dir, &branch)?;
 
-    // Step 6: Start UDS listener (handled below in event loop)
-
     // Step 7: Check last_shutdown — dirty → full freshness scan
     let last_shutdown = queries::get_meta(&meta_conn, "last_shutdown")?;
     let needs_full_scan = last_shutdown.as_deref() != Some("clean");
@@ -128,7 +176,7 @@ pub async fn run_daemon(project_root: PathBuf) -> Result<(), Box<dyn std::error:
     {
         let mut g = graph.write();
         if needs_full_scan {
-            eprintln!("Daemon: performing full freshness scan...");
+            tracing::info!("performing full freshness scan (last shutdown was dirty)");
         }
         g.load_from_db(&branch_conn)?;
 
@@ -145,9 +193,10 @@ pub async fn run_daemon(project_root: PathBuf) -> Result<(), Box<dyn std::error:
         graph,
         branch_db: Arc::new(Mutex::new(Some(branch_conn))),
         meta_db: Arc::new(Mutex::new(meta_conn)),
-        current_branch: Arc::new(RwLock::new(branch)),
+        current_branch: Arc::new(RwLock::new(branch.clone())),
         session_id: Arc::new(RwLock::new(session_id)),
         reindex_state: Arc::new(RwLock::new(ReindexState::Ready)),
+        metrics: Arc::new(metrics::DaemonMetrics::new()),
     });
 
     // Step 11: Start file watcher
@@ -157,10 +206,10 @@ pub async fn run_daemon(project_root: PathBuf) -> Result<(), Box<dyn std::error:
             tokio::spawn(async move {
                 handle_watch_events(&watcher_state, &mut rx).await;
             });
-            eprintln!("Daemon: file watcher started");
+            tracing::info!("file watcher started");
         }
         Err(e) => {
-            eprintln!("Daemon: file watcher failed to start: {e} (continuing without)");
+            tracing::warn!(error = %e, "file watcher failed to start, continuing without");
         }
     }
 
@@ -175,16 +224,46 @@ pub async fn run_daemon(project_root: PathBuf) -> Result<(), Box<dyn std::error:
     let listener_state = state.clone();
     let listener_handle = tokio::spawn(async move {
         if let Err(e) = socket::listen(socket_path, listener_state, shutdown_rx).await {
-            eprintln!("Socket listener error: {e}");
+            tracing::error!(error = %e, "socket listener error");
         }
     });
 
-    daemon_log(&scavenger_dir, "startup", &serde_json::json!({
-        "branch": state.current_branch.read().clone(),
-        "nodes": state.graph.read().node_count(),
-        "edges": state.graph.read().edge_count(),
-    }));
-    eprintln!("Daemon: ready (PID {})", std::process::id());
+    // Periodic metrics snapshot (every 60s)
+    let snapshot_state = state.clone();
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(60));
+        loop {
+            interval.tick().await;
+            let nodes = snapshot_state.graph.read().node_count();
+            let edges = snapshot_state.graph.read().edge_count();
+            let snapshot = snapshot_state.metrics.snapshot(nodes, edges);
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs() as i64;
+            let meta = snapshot_state.meta_db.lock();
+            let json_str = serde_json::to_string(&snapshot).unwrap_or_default();
+            let _ = meta.execute(
+                "INSERT INTO metrics_snapshots (timestamp, json_blob) VALUES (?1, ?2)",
+                rusqlite::params![now, json_str],
+            );
+            // Retain only last 24h of snapshots
+            let _ = meta.execute(
+                "DELETE FROM metrics_snapshots WHERE timestamp < ?1",
+                rusqlite::params![now - 86400],
+            );
+        }
+    });
+
+    let nodes = state.graph.read().node_count();
+    let edges = state.graph.read().edge_count();
+    tracing::info!(
+        branch = %branch,
+        nodes,
+        edges,
+        pid = std::process::id(),
+        "daemon ready"
+    );
 
     // Wait for SIGTERM/SIGINT
     let ctrl_c = signal::ctrl_c();
@@ -201,12 +280,9 @@ pub async fn run_daemon(project_root: PathBuf) -> Result<(), Box<dyn std::error:
         ctrl_c.await?;
     }
 
-    eprintln!("Daemon: shutting down...");
+    tracing::info!("shutting down...");
 
-    // Shutdown: stop accepting, drain, flush, clean shutdown
     let _ = shutdown_tx.send(true);
-
-    // Give handlers 5 seconds to drain
     tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
     listener_handle.abort();
 
@@ -229,8 +305,7 @@ pub async fn run_daemon(project_root: PathBuf) -> Result<(), Box<dyn std::error:
     let _ = std::fs::remove_file(scavenger_dir.join("daemon.sock"));
     let _ = lock_file.unlock();
 
-    daemon_log(&scavenger_dir, "shutdown", &serde_json::json!({"clean": true}));
-    eprintln!("Daemon: stopped cleanly.");
+    tracing::info!("stopped cleanly");
     Ok(())
 }
 
@@ -247,7 +322,7 @@ async fn handle_watch_events(
         match event {
             WatchEvent::BranchSwitch => {
                 if let Err(e) = coordinator::ReindexCoordinator::check_branch_switch(state) {
-                    eprintln!("Branch switch error: {e}");
+                    tracing::error!(error = %e, "branch switch error");
                 }
             }
             WatchEvent::FilesChanged(files) => {
@@ -256,13 +331,16 @@ async fn handle_watch_events(
                 }
                 *state.reindex_state.write() = ReindexState::Indexing;
 
+                let reindex_start = std::time::Instant::now();
+                let file_count = files.len();
                 let mut cross_file_queue: HashSet<std::path::PathBuf> = HashSet::new();
 
                 for file in &files {
                     let file_str = file.to_string_lossy().to_string();
                     match watcher::route_file(file) {
                         FileRoute::Code => {
-                            // Phase 1: prep (no graph lock)
+                            let _span = tracing::info_span!("reindex_file", file = %file_str).entered();
+
                             let prep = {
                                 let db_guard = state.branch_db.lock();
                                 let Some(ref conn) = *db_guard else { continue };
@@ -270,31 +348,32 @@ async fn handle_watch_events(
                                 match index::incremental_reindex_prep(conn, &graph, &file_str) {
                                     Ok(p) => p,
                                     Err(e) => {
-                                        eprintln!("Reindex prep error for {file_str}: {e}");
+                                        tracing::warn!(file = %file_str, error = %e, "reindex prep failed");
                                         continue;
                                     }
                                 }
                             };
 
-                            // Phase 2: swap (write lock)
                             {
                                 let db_guard = state.branch_db.lock();
                                 let Some(ref conn) = *db_guard else { continue };
                                 let mut graph = state.graph.write();
                                 match index::incremental_reindex_swap(conn, &mut graph, prep) {
                                     Ok(stats) => {
-                                        eprintln!(
-                                            "Reindexed {file_str}: -{} +{} nodes, +{} edges, {} migrated",
-                                            stats.nodes_removed, stats.nodes_added,
-                                            stats.edges_added, stats.annotations_migrated
+                                        tracing::info!(
+                                            file = %file_str,
+                                            nodes_removed = stats.nodes_removed,
+                                            nodes_added = stats.nodes_added,
+                                            edges_added = stats.edges_added,
+                                            annotations_migrated = stats.annotations_migrated,
+                                            "reindexed"
                                         );
                                     }
                                     Err(e) => {
-                                        eprintln!("Reindex swap error for {file_str}: {e}");
+                                        tracing::warn!(file = %file_str, error = %e, "reindex swap failed");
                                     }
                                 }
 
-                                // Queue cross-file affected files
                                 let affected = index::cross_file_affected(&graph, &file_str);
                                 cross_file_queue.extend(affected);
                             }
@@ -304,7 +383,7 @@ async fn handle_watch_events(
                                 let db_guard = state.branch_db.lock();
                                 if let Some(ref conn) = *db_guard {
                                     if let Err(e) = doc_indexer::index_doc_file(conn, &file_str, &content) {
-                                        eprintln!("Doc reindex error for {file_str}: {e}");
+                                        tracing::warn!(file = %file_str, error = %e, "doc reindex failed");
                                     }
                                 }
                             }
@@ -354,6 +433,16 @@ async fn handle_watch_events(
                 }
 
                 *state.reindex_state.write() = ReindexState::Ready;
+
+                let duration_us = reindex_start.elapsed().as_micros() as u64;
+                state.metrics.reindex_count.inc();
+                state.metrics.reindex_duration_us.record(duration_us);
+                tracing::info!(
+                    files = file_count,
+                    cross_file = cross_file_queue.len(),
+                    duration_us,
+                    "reindex batch complete"
+                );
             }
         }
     }
