@@ -542,7 +542,7 @@ mod tests {
         let manifest = read_json(&plugin_dir(tmp.path()).join(".claude-plugin/plugin.json"));
         assert_eq!(manifest["name"], "scavenger");
         assert!(manifest["description"].as_str().unwrap().contains("AST"));
-        assert_eq!(manifest["version"], "0.1.1");
+        assert_eq!(manifest["version"], "0.2.0");
     }
 
     #[test]

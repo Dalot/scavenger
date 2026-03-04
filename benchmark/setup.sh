@@ -46,7 +46,7 @@ scavenger init 2>&1 | tail -3
 
 # --- Start daemon ---
 echo "Starting scavenger daemon..."
-scavenger daemon &
+scavenger daemon start &
 DAEMON_PID=$!
 sleep 5
 
