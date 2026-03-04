@@ -204,7 +204,7 @@ pub fn create_plugin(project_root: &Path) -> Result<(), PluginError> {
         serde_json::to_string_pretty(&json!({
             "name": "scavenger",
             "description": "AST dependency graph and session memory engine -- serves focused capsules instead of full files",
-            "version": "0.1.1"
+            "version": "0.2.0"
         }))?,
     )?;
 

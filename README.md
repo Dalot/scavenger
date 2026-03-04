@@ -140,7 +140,7 @@ That's it. `scavenger init` automatically:
 - Writes `.cursor/mcp.json` and `.cursor/hooks.json` for Cursor
 - Adds `.scavenger/` to `.gitignore`
 
-The daemon starts and stops automatically with each agent session — no manual `scavenger daemon` needed.
+The daemon starts and stops automatically with each agent session — no manual management needed. You can also control it explicitly with `scavenger daemon start`, `scavenger daemon stop`, and `scavenger daemon status`.
 
 ## Agent Setup
 
@@ -160,7 +160,7 @@ claude mcp add scavenger -- scavenger mcp-bridge
 
 ### Cursor
 
-No extra steps after `scavenger init`. Cursor picks up `.cursor/mcp.json` and `.cursor/hooks.json` automatically.
+After `scavenger init`, reload the Cursor window so it picks up the new `.cursor/mcp.json` and `.cursor/hooks.json` files. Open the command palette (`Ctrl+Shift+P` / `Cmd+Shift+P`) and run **Developer: Reload Window**. You only need to do this once — after the initial reload, everything works automatically.
 
 ### Other MCP-compatible tools
 
@@ -199,7 +199,10 @@ Available in any MCP-connected agent as callable tools. Agents without hook supp
 | Command | Description |
 |---------|-------------|
 | `scavenger init` | Initialize on a project (index + register hooks for all agents) |
-| `scavenger daemon` | Start the daemon manually in foreground (normally auto-managed) |
+| `scavenger daemon start` | Start the daemon in foreground (normally auto-managed by hooks) |
+| `scavenger daemon stop` | Stop a running daemon |
+| `scavenger daemon restart` | Stop and restart the daemon |
+| `scavenger daemon status` | Show daemon status (running, PID, branch, graph size) |
 | `scavenger index [path]` | Manually re-index files |
 | `scavenger capsule <file> [symbol]` | Print a capsule to stdout |
 | `scavenger graph stats` | Show node/edge counts and top centrality |

@@ -222,7 +222,7 @@ fn ui(f: &mut ratatui::Frame, app: &AppState) {
                 Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
             )),
             Line::from(""),
-            Line::from("Start the daemon with: scavenger daemon"),
+            Line::from("Start the daemon with: scavenger daemon start"),
         ])
         .block(Block::default().borders(Borders::ALL).title("Status"));
         f.render_widget(error_block, main_layout[1]);
