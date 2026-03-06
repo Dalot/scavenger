@@ -197,18 +197,18 @@ impl MemoryManager {
             if exists {
                 deduped += 1;
             } else {
-                if at.as_deref() == Some("node") {
-                    if let Some(ref node_id) = av {
-                        let node_exists: bool = target_conn
-                            .query_row(
-                                "SELECT COUNT(*) FROM nodes WHERE id = ?1",
-                                rusqlite::params![node_id],
-                                |row| row.get::<_, i64>(0).map(|c| c > 0),
-                            )
-                            .unwrap_or(false);
-                        if !node_exists {
-                            continue;
-                        }
+                if at.as_deref() == Some("node")
+                    && let Some(ref node_id) = av
+                {
+                    let node_exists: bool = target_conn
+                        .query_row(
+                            "SELECT COUNT(*) FROM nodes WHERE id = ?1",
+                            rusqlite::params![node_id],
+                            |row| row.get::<_, i64>(0).map(|c| c > 0),
+                        )
+                        .unwrap_or(false);
+                    if !node_exists {
+                        continue;
                     }
                 }
 

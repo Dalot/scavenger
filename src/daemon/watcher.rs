@@ -4,6 +4,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use notify::RecursiveMode;
+use notify::event::{EventKind, ModifyKind};
 use notify_debouncer_full::{DebouncedEvent, new_debouncer};
 use parking_lot::Mutex;
 use tokio::sync::mpsc;
@@ -30,9 +31,6 @@ pub fn start_watcher(
     let git_dir = root.join(".git");
     let scavenger_dir = root.join(".scavenger");
 
-    // Build gitignore matcher for filtering
-    let gitignore = build_gitignore(&root);
-
     let pending_events: Arc<Mutex<Vec<DebouncedEvent>>> = Arc::new(Mutex::new(Vec::new()));
     let pending_clone = pending_events.clone();
     let event_tx_clone = event_tx.clone();
@@ -52,7 +50,7 @@ pub fn start_watcher(
             }
             Err(errors) => {
                 for e in errors {
-                    eprintln!("Watcher error: {e}");
+                    tracing::warn!("watcher error: {e}");
                 }
             }
         },
@@ -61,7 +59,6 @@ pub fn start_watcher(
     debouncer.watch(&root, RecursiveMode::Recursive)?;
 
     // Spawn a processing loop that drains pending events periodically
-    let gitignore_clone = gitignore;
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_millis(350));
         loop {
@@ -81,6 +78,16 @@ pub fn start_watcher(
             let mut saw_git_index_lock = false;
 
             for event in &events {
+                // Skip non-mutating events: access (open/close/read) and
+                // metadata-only changes (atime, permissions). Without this
+                // filter, the daemon's own file reads trigger IN_ATTRIB via
+                // inotify, creating an infinite reindex loop.
+                match event.kind {
+                    EventKind::Access(_) => continue,
+                    EventKind::Modify(ModifyKind::Metadata(_)) => continue,
+                    _ => {}
+                }
+
                 for path in &event.paths {
                     // Check VCS operations
                     if path.starts_with(&git_dir) {
@@ -99,11 +106,12 @@ pub fn start_watcher(
                     }
 
                     // Skip gitignored files
-                    if is_gitignored(path, &root_clone, &gitignore_clone) {
+                    if is_gitignored(path, &root_clone) {
                         continue;
                     }
 
                     if path.is_file() {
+                        tracing::info!(kind = ?event.kind, path = %path.display(), "watcher: file changed");
                         changed_files.insert(path.clone());
                     }
                 }
@@ -130,6 +138,7 @@ pub fn start_watcher(
 
             if !changed_files.is_empty() {
                 let files: Vec<PathBuf> = changed_files.into_iter().collect();
+                tracing::debug!(count = files.len(), files = ?files, "watcher batch");
                 let _ = event_tx_clone.send(WatchEvent::FilesChanged(files));
             }
         }
@@ -141,24 +150,19 @@ pub fn start_watcher(
     Ok(event_rx)
 }
 
-fn build_gitignore(root: &Path) -> ignore::gitignore::Gitignore {
-    let mut builder = ignore::gitignore::GitignoreBuilder::new(root);
-    let gitignore_path = root.join(".gitignore");
-    if gitignore_path.exists() {
-        let _ = builder.add(&gitignore_path);
-    }
-    builder.build().unwrap_or_else(|_| {
-        ignore::gitignore::GitignoreBuilder::new(root)
-            .build()
-            .unwrap()
-    })
-}
-
-fn is_gitignored(path: &Path, root: &Path, gitignore: &ignore::gitignore::Gitignore) -> bool {
-    let is_dir = path.is_dir();
-    gitignore
-        .matched_path_or_any_parents(path.strip_prefix(root).unwrap_or(path), is_dir)
-        .is_ignore()
+/// Check if a path is git-ignored using `git check-ignore`.
+/// Handles ALL gitignore sources: root .gitignore, nested .gitignore files,
+/// .git/info/exclude, and global gitignore config.
+pub fn is_gitignored(path: &Path, project_root: &Path) -> bool {
+    std::process::Command::new("git")
+        .args(["check-ignore", "-q"])
+        .arg(path)
+        .current_dir(project_root)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
 }
 
 /// Route a changed file to the appropriate indexer.
@@ -228,5 +232,94 @@ mod tests {
     fn test_route_skip_files() {
         assert_eq!(route_file(Path::new("image.png")), FileRoute::Skip);
         assert_eq!(route_file(Path::new("data.json")), FileRoute::Skip);
+    }
+
+    #[test]
+    fn test_is_gitignored() {
+        let tmp = std::env::temp_dir().join("scavenger_test_gitignore");
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+
+        // Init a git repo
+        std::process::Command::new("git")
+            .args(["init"])
+            .current_dir(&tmp)
+            .output()
+            .unwrap();
+
+        // Write .gitignore with patterns
+        std::fs::write(tmp.join(".gitignore"), "ignored_dir/\n*.log\n.secret/\n").unwrap();
+
+        // Create test files and directories
+        std::fs::create_dir_all(tmp.join("ignored_dir")).unwrap();
+        std::fs::write(tmp.join("ignored_dir/file.py"), "x").unwrap();
+        std::fs::create_dir_all(tmp.join(".secret")).unwrap();
+        std::fs::write(tmp.join(".secret/keys.py"), "x").unwrap();
+        std::fs::write(tmp.join("app.log"), "x").unwrap();
+        std::fs::create_dir_all(tmp.join("src")).unwrap();
+        std::fs::write(tmp.join("src/main.py"), "x").unwrap();
+
+        // Files in gitignored directories should be ignored
+        assert!(
+            is_gitignored(&tmp.join("ignored_dir/file.py"), &tmp),
+            "file in ignored_dir/ should be gitignored"
+        );
+        assert!(
+            is_gitignored(&tmp.join(".secret/keys.py"), &tmp),
+            "file in .secret/ should be gitignored"
+        );
+
+        // Files matching gitignore patterns should be ignored
+        assert!(
+            is_gitignored(&tmp.join("app.log"), &tmp),
+            "*.log files should be gitignored"
+        );
+
+        // Tracked source files should NOT be ignored
+        assert!(
+            !is_gitignored(&tmp.join("src/main.py"), &tmp),
+            "src/main.py should NOT be gitignored"
+        );
+
+        // Non-existent file in ignored dir should still be ignored
+        assert!(
+            is_gitignored(&tmp.join("ignored_dir/new_file.py"), &tmp),
+            "non-existent file in ignored_dir/ should be gitignored"
+        );
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn test_is_gitignored_nested_gitignore() {
+        let tmp = std::env::temp_dir().join("scavenger_test_nested_gitignore");
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+
+        std::process::Command::new("git")
+            .args(["init"])
+            .current_dir(&tmp)
+            .output()
+            .unwrap();
+
+        // Root .gitignore only ignores *.log
+        std::fs::write(tmp.join(".gitignore"), "*.log\n").unwrap();
+
+        // Nested .gitignore ignores a local directory
+        std::fs::create_dir_all(tmp.join("subdir/cache")).unwrap();
+        std::fs::write(tmp.join("subdir/.gitignore"), "cache/\n").unwrap();
+        std::fs::write(tmp.join("subdir/cache/data.py"), "x").unwrap();
+        std::fs::write(tmp.join("subdir/real.py"), "x").unwrap();
+
+        assert!(
+            is_gitignored(&tmp.join("subdir/cache/data.py"), &tmp),
+            "file in subdir/cache/ should be caught by nested .gitignore"
+        );
+        assert!(
+            !is_gitignored(&tmp.join("subdir/real.py"), &tmp),
+            "subdir/real.py should NOT be gitignored"
+        );
+
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 }

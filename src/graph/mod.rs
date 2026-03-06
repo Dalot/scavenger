@@ -110,16 +110,16 @@ impl GraphState {
     pub fn rebuild_reverse_index(&mut self) {
         self.reverse_index.clear();
         for edge in self.graph.edge_indices() {
-            if let Some((source, target)) = self.graph.edge_endpoints(edge) {
-                if let (Some(src_w), Some(tgt_w)) = (
+            if let Some((source, target)) = self.graph.edge_endpoints(edge)
+                && let (Some(src_w), Some(tgt_w)) = (
                     self.graph.node_weight(source),
                     self.graph.node_weight(target),
-                ) {
-                    self.reverse_index
-                        .entry(tgt_w.id.clone())
-                        .or_default()
-                        .push(src_w.file_path.clone());
-                }
+                )
+            {
+                self.reverse_index
+                    .entry(tgt_w.id.clone())
+                    .or_default()
+                    .push(src_w.file_path.clone());
             }
         }
         for paths in self.reverse_index.values_mut() {

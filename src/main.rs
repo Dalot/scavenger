@@ -846,12 +846,12 @@ fn run_doctor_once(verbose: bool, format: &OutputFormat) -> Result<(), Box<dyn s
                     "WARN" => log_warnings += 1,
                     _ => {}
                 }
-                if let Some(fields) = parsed.get("fields").and_then(|v| v.as_object()) {
-                    if fields.get("message").and_then(|v| v.as_str()) == Some("capsule served") {
-                        total_capsules += 1;
-                        if fields.get("empty").and_then(|v| v.as_bool()) == Some(true) {
-                            empty_capsules += 1;
-                        }
+                if let Some(fields) = parsed.get("fields").and_then(|v| v.as_object())
+                    && fields.get("message").and_then(|v| v.as_str()) == Some("capsule served")
+                {
+                    total_capsules += 1;
+                    if fields.get("empty").and_then(|v| v.as_bool()) == Some(true) {
+                        empty_capsules += 1;
                     }
                 }
             }

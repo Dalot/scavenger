@@ -145,19 +145,19 @@ impl ReindexCoordinator {
                 source_branch.replace(['/', '\\', ':', '*', '?', '"', '<', '>', '|'], "_");
             let source_db_path = indexes_dir.join(format!("{sanitized}.db"));
 
-            if source_db_path.exists() {
-                if let Ok(source_conn) = db::open_branch_db(&state.scavenger_dir, source_branch) {
-                    let db_guard = state.branch_db.lock();
-                    if let Some(ref target_conn) = *db_guard {
-                        match memory::MemoryManager::merge_annotations(&source_conn, target_conn) {
-                            Ok(result) => {
-                                eprintln!(
-                                    "Merged annotations from {source_branch}: {} imported, {} deduped",
-                                    result.imported, result.deduped
-                                );
-                            }
-                            Err(e) => eprintln!("Annotation merge error from {source_branch}: {e}"),
+            if source_db_path.exists()
+                && let Ok(source_conn) = db::open_branch_db(&state.scavenger_dir, source_branch)
+            {
+                let db_guard = state.branch_db.lock();
+                if let Some(ref target_conn) = *db_guard {
+                    match memory::MemoryManager::merge_annotations(&source_conn, target_conn) {
+                        Ok(result) => {
+                            eprintln!(
+                                "Merged annotations from {source_branch}: {} imported, {} deduped",
+                                result.imported, result.deduped
+                            );
                         }
+                        Err(e) => eprintln!("Annotation merge error from {source_branch}: {e}"),
                     }
                 }
             }
@@ -245,16 +245,16 @@ impl ReindexCoordinator {
 
         let mut cleaned = 0u64;
         for entry in std::fs::read_dir(&indexes_dir)?.flatten() {
-            if let Some(name) = entry.file_name().to_str() {
-                if let Some(branch_name) = name.strip_suffix(".db") {
-                    if branch_name == current_sanitized {
-                        continue;
-                    }
-                    if !live_sanitized.contains(branch_name) {
-                        let _ = std::fs::remove_file(entry.path());
-                        eprintln!("Cleaned up stale branch DB: {name}");
-                        cleaned += 1;
-                    }
+            if let Some(name) = entry.file_name().to_str()
+                && let Some(branch_name) = name.strip_suffix(".db")
+            {
+                if branch_name == current_sanitized {
+                    continue;
+                }
+                if !live_sanitized.contains(branch_name) {
+                    let _ = std::fs::remove_file(entry.path());
+                    eprintln!("Cleaned up stale branch DB: {name}");
+                    cleaned += 1;
                 }
             }
         }
@@ -318,13 +318,13 @@ fn find_merged_branches(project_root: &std::path::Path) -> Vec<String> {
             .current_dir(project_root)
             .output();
 
-        if let Ok(out) = output {
-            if out.status.success() {
-                for line in String::from_utf8_lossy(&out.stdout).lines() {
-                    let branch = line.trim().to_string();
-                    if !branch.is_empty() && !branches.contains(&branch) {
-                        branches.push(branch);
-                    }
+        if let Ok(out) = output
+            && out.status.success()
+        {
+            for line in String::from_utf8_lossy(&out.stdout).lines() {
+                let branch = line.trim().to_string();
+                if !branch.is_empty() && !branches.contains(&branch) {
+                    branches.push(branch);
                 }
             }
         }

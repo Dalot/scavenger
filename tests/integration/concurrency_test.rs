@@ -90,7 +90,9 @@ fn test_split_phase_reindex_under_contention() {
 
     // Prep phase (no lock needed)
     std::fs::write(&src, "fn original() {}\nfn added() {}").unwrap();
-    let prep = index::incremental_reindex_prep(&conn, &g, &file_str).unwrap();
+    let prep = index::incremental_reindex_prep(&conn, &g, &file_str)
+        .unwrap()
+        .expect("file was modified, prep should not be None");
 
     // Readers can still work during prep
     assert_eq!(g.node_count(), 1);

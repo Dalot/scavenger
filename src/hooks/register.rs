@@ -172,15 +172,15 @@ fn remove_scavenger_cursor_hook(
     hooks: &mut serde_json::Map<String, serde_json::Value>,
     event: &str,
 ) {
-    if let Some(arr_val) = hooks.get_mut(event) {
-        if let Some(arr) = arr_val.as_array_mut() {
-            arr.retain(|entry| {
-                let cmd = entry.get("command").and_then(|v| v.as_str()).unwrap_or("");
-                !cmd.starts_with("scavenger ")
-            });
-            if arr.is_empty() {
-                hooks.remove(event);
-            }
+    if let Some(arr_val) = hooks.get_mut(event)
+        && let Some(arr) = arr_val.as_array_mut()
+    {
+        arr.retain(|entry| {
+            let cmd = entry.get("command").and_then(|v| v.as_str()).unwrap_or("");
+            !cmd.starts_with("scavenger ")
+        });
+        if arr.is_empty() {
+            hooks.remove(event);
         }
     }
 }
@@ -439,27 +439,27 @@ pub fn remove_legacy_settings(project_root: &Path) -> Result<(), PluginError> {
     let obj = settings.as_object_mut().unwrap();
     let mut changed = false;
 
-    if let Some(hooks_val) = obj.get_mut("hooks") {
-        if let Some(hooks) = hooks_val.as_object_mut() {
-            for event in &["PreToolUse", "PostToolUse"] {
-                if let Some(arr_val) = hooks.get_mut(*event) {
-                    if let Some(arr) = arr_val.as_array_mut() {
-                        let before = arr.len();
-                        arr.retain(|entry| !is_scavenger_hook_entry(entry));
-                        if arr.len() != before {
-                            changed = true;
-                        }
-                        if arr.is_empty() {
-                            hooks.remove(*event);
-                            changed = true;
-                        }
-                    }
+    if let Some(hooks_val) = obj.get_mut("hooks")
+        && let Some(hooks) = hooks_val.as_object_mut()
+    {
+        for event in &["PreToolUse", "PostToolUse"] {
+            if let Some(arr_val) = hooks.get_mut(*event)
+                && let Some(arr) = arr_val.as_array_mut()
+            {
+                let before = arr.len();
+                arr.retain(|entry| !is_scavenger_hook_entry(entry));
+                if arr.len() != before {
+                    changed = true;
+                }
+                if arr.is_empty() {
+                    hooks.remove(*event);
+                    changed = true;
                 }
             }
-            if hooks.is_empty() {
-                obj.remove("hooks");
-                changed = true;
-            }
+        }
+        if hooks.is_empty() {
+            obj.remove("hooks");
+            changed = true;
         }
     }
 
@@ -485,10 +485,10 @@ pub fn remove_legacy_settings(project_root: &Path) -> Result<(), PluginError> {
 }
 
 fn is_scavenger_hook_entry(entry: &serde_json::Value) -> bool {
-    if let Some(hook_str) = entry.get("hook").and_then(|v| v.as_str()) {
-        if hook_str == SCAVENGER_PRE_CMD || hook_str == SCAVENGER_POST_CMD {
-            return true;
-        }
+    if let Some(hook_str) = entry.get("hook").and_then(|v| v.as_str())
+        && (hook_str == SCAVENGER_PRE_CMD || hook_str == SCAVENGER_POST_CMD)
+    {
+        return true;
     }
     if let Some(hooks_arr) = entry.get("hooks").and_then(|v| v.as_array()) {
         return hooks_arr.iter().any(|h| {

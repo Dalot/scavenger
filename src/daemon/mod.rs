@@ -347,7 +347,11 @@ async fn handle_watch_events(
                                 let Some(ref conn) = *db_guard else { continue };
                                 let graph = state.graph.read();
                                 match index::incremental_reindex_prep(conn, &graph, &file_str) {
-                                    Ok(p) => p,
+                                    Ok(Some(p)) => p,
+                                    Ok(None) => {
+                                        tracing::debug!(file = %file_str, "skipped (unchanged)");
+                                        continue;
+                                    }
                                     Err(e) => {
                                         tracing::warn!(file = %file_str, error = %e, "reindex prep failed");
                                         continue;
@@ -382,12 +386,11 @@ async fn handle_watch_events(
                         FileRoute::Doc => {
                             if let Ok(content) = std::fs::read_to_string(file) {
                                 let db_guard = state.branch_db.lock();
-                                if let Some(ref conn) = *db_guard {
-                                    if let Err(e) =
+                                if let Some(ref conn) = *db_guard
+                                    && let Err(e) =
                                         doc_indexer::index_doc_file(conn, &file_str, &content)
-                                    {
-                                        tracing::warn!(file = %file_str, error = %e, "doc reindex failed");
-                                    }
+                                {
+                                    tracing::warn!(file = %file_str, error = %e, "doc reindex failed");
                                 }
                             }
                         }
@@ -406,7 +409,8 @@ async fn handle_watch_events(
                         let Some(ref conn) = *db_guard else { continue };
                         let graph = state.graph.read();
                         match index::incremental_reindex_prep(conn, &graph, &file_str) {
-                            Ok(p) => p,
+                            Ok(Some(p)) => p,
+                            Ok(None) => continue,
                             Err(_) => continue,
                         }
                     };
