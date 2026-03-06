@@ -1,3 +1,4 @@
+use std::path::Path;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -14,17 +15,17 @@ pub async fn dispatch(state: &Arc<DaemonState>, request: Value) -> Value {
     let request_id = super::next_request_id();
     let start = Instant::now();
 
-    if let Some(incoming_session) = request.get("session_id").and_then(|v| v.as_str()) {
-        if !incoming_session.is_empty() {
-            let current = state.session_id.read().clone();
-            if current != incoming_session {
-                *state.session_id.write() = incoming_session.to_string();
-                tracing::info!(
-                    old_session = %current,
-                    new_session = %incoming_session,
-                    "session changed"
-                );
-            }
+    if let Some(incoming_session) = request.get("session_id").and_then(|v| v.as_str())
+        && !incoming_session.is_empty()
+    {
+        let current = state.session_id.read().clone();
+        if current != incoming_session {
+            *state.session_id.write() = incoming_session.to_string();
+            tracing::info!(
+                old_session = %current,
+                new_session = %incoming_session,
+                "session changed"
+            );
         }
     }
 
@@ -238,6 +239,11 @@ async fn handle_hook_pre(state: &Arc<DaemonState>, request: &Value) -> Value {
 
 async fn handle_hook_post(state: &Arc<DaemonState>, request: &Value) -> Value {
     if let Some(file) = request.get("file").and_then(|v| v.as_str()) {
+        if super::watcher::is_gitignored(Path::new(file), &state.project_root) {
+            tracing::debug!(file = %file, "hook_post skipped (gitignored)");
+            return json!({});
+        }
+
         state.metrics.hook_post_count.inc();
         let start = Instant::now();
 
@@ -259,7 +265,11 @@ async fn handle_hook_post(state: &Arc<DaemonState>, request: &Value) -> Value {
             };
             let graph = state.graph.read();
             match crate::graph::index::incremental_reindex_prep(conn, &graph, file) {
-                Ok(p) => p,
+                Ok(Some(p)) => p,
+                Ok(None) => {
+                    tracing::debug!(file = %file, "hook_post skipped (unchanged)");
+                    return json!({});
+                }
                 Err(e) => {
                     tracing::warn!(file = %file, error = %e, "hook_post reindex prep failed");
                     return json!({});
@@ -434,36 +444,35 @@ async fn handle_annotation_write(state: &Arc<DaemonState>, request: &Value) -> V
 
     let mut note: Option<String> = None;
 
-    if anchor_type.as_deref() == Some("node") {
-        if let Some(ref av) = anchor_value {
-            if !av.chars().all(|c| c.is_ascii_hexdigit()) || av.len() != 32 {
-                match queries::search_nodes_fts(conn, av, 5) {
-                    Ok(matches) if !matches.is_empty() => {
-                        anchor_value = Some(matches[0].id.clone());
+    if anchor_type.as_deref() == Some("node")
+        && let Some(ref av) = anchor_value
+        && (!av.chars().all(|c| c.is_ascii_hexdigit()) || av.len() != 32)
+    {
+        match queries::search_nodes_fts(conn, av, 5) {
+            Ok(matches) if !matches.is_empty() => {
+                anchor_value = Some(matches[0].id.clone());
 
-                        if matches.len() > 1 {
-                            let top_rank = matches[0].rank.abs();
-                            let threshold = top_rank * 1.2;
-                            let close_matches: Vec<&str> = matches
-                                .iter()
-                                .filter(|m| m.rank.abs() <= threshold)
-                                .map(|m| m.id.as_str())
-                                .collect();
-                            if close_matches.len() > 1 {
-                                note = Some(format!(
-                                    "Disambiguated: {} candidates within 20%. Selected: {}. Alternatives: {}",
-                                    close_matches.len(),
-                                    close_matches[0],
-                                    close_matches[1..].join(", ")
-                                ));
-                            }
-                        }
-                    }
-                    _ => {
-                        anchor_type = None;
-                        anchor_value = None;
+                if matches.len() > 1 {
+                    let top_rank = matches[0].rank.abs();
+                    let threshold = top_rank * 1.2;
+                    let close_matches: Vec<&str> = matches
+                        .iter()
+                        .filter(|m| m.rank.abs() <= threshold)
+                        .map(|m| m.id.as_str())
+                        .collect();
+                    if close_matches.len() > 1 {
+                        note = Some(format!(
+                            "Disambiguated: {} candidates within 20%. Selected: {}. Alternatives: {}",
+                            close_matches.len(),
+                            close_matches[0],
+                            close_matches[1..].join(", ")
+                        ));
                     }
                 }
+            }
+            _ => {
+                anchor_type = None;
+                anchor_value = None;
             }
         }
     }

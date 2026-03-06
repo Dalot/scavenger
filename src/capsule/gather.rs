@@ -61,18 +61,18 @@ pub fn gather(
     let mut candidates = Vec::new();
 
     // 1. Target node (always included if present)
-    if let Some(ref target_id) = query_result.target {
-        if let Some(w) = graph.get_weight(target_id) {
-            candidates.push(new_candidate(
-                w.skeleton.clone(),
-                estimate_tokens(&w.skeleton),
-                CandidateSource::Target,
-                Some(target_id.clone()),
-                Some(w.file_path.to_string_lossy().to_string()),
-                false,
-                false,
-            ));
-        }
+    if let Some(ref target_id) = query_result.target
+        && let Some(w) = graph.get_weight(target_id)
+    {
+        candidates.push(new_candidate(
+            w.skeleton.clone(),
+            estimate_tokens(&w.skeleton),
+            CandidateSource::Target,
+            Some(target_id.clone()),
+            Some(w.file_path.to_string_lossy().to_string()),
+            false,
+            false,
+        ));
     }
 
     // 2. Graph neighbors via traversal
@@ -280,31 +280,31 @@ fn gather_annotations(
 }
 
 fn gather_node_history(conn: &Connection, target_id: &NodeId, candidates: &mut Vec<CandidateItem>) {
-    if let Some(sig_hash) = crate::db::queries::get_node_signature_hash(conn, &target_id.0) {
-        if let Ok(versions) = crate::memory::versions::get_recent_versions(conn, &sig_hash, 5) {
-            if versions.len() < 2 {
-                return;
-            }
-            // Compare consecutive versions to determine change type
-            for (i, ver) in versions.iter().enumerate().skip(1) {
-                let prev = &versions[i - 1];
-                let significance = compute_change_significance(prev, ver);
-                let change_desc = describe_change(prev, ver);
-                let content = format!("[CHANGED] {change_desc}");
-                let mut item = new_candidate(
-                    content.clone(),
-                    estimate_tokens(&content),
-                    CandidateSource::NodeHistory,
-                    Some(target_id.clone()),
-                    None,
-                    false,
-                    false,
-                );
-                item.version_distance = Some(i as u32);
-                item.change_significance = Some(significance);
-                item.timestamp = Some(ver.created_at);
-                candidates.push(item);
-            }
+    if let Some(sig_hash) = crate::db::queries::get_node_signature_hash(conn, &target_id.0)
+        && let Ok(versions) = crate::memory::versions::get_recent_versions(conn, &sig_hash, 5)
+    {
+        if versions.len() < 2 {
+            return;
+        }
+        // Compare consecutive versions to determine change type
+        for (i, ver) in versions.iter().enumerate().skip(1) {
+            let prev = &versions[i - 1];
+            let significance = compute_change_significance(prev, ver);
+            let change_desc = describe_change(prev, ver);
+            let content = format!("[CHANGED] {change_desc}");
+            let mut item = new_candidate(
+                content.clone(),
+                estimate_tokens(&content),
+                CandidateSource::NodeHistory,
+                Some(target_id.clone()),
+                None,
+                false,
+                false,
+            );
+            item.version_distance = Some(i as u32);
+            item.change_significance = Some(significance);
+            item.timestamp = Some(ver.created_at);
+            candidates.push(item);
         }
     }
 }
@@ -372,25 +372,25 @@ fn gather_doc_chunks(
         .first()
         .map(|r| r.node_id.0.clone())
         .unwrap_or_default();
-    if !search_query.is_empty() {
-        if let Ok(doc_matches) = crate::db::queries::search_doc_chunks_fts(conn, &search_query, 5) {
-            for m in doc_matches {
-                if seen_files.contains(&m.file_path) {
-                    continue;
-                }
-                let heading = m.heading.as_deref().unwrap_or("(untitled)");
-                let is_priority = config.docs.priority.iter().any(|p| m.file_path.contains(p));
-                let content = format!("[doc: {} > {}]\n{}", m.file_path, heading, m.content);
-                candidates.push(new_candidate(
-                    content.clone(),
-                    estimate_tokens(&content),
-                    CandidateSource::DocChunk,
-                    None,
-                    Some(m.file_path),
-                    false,
-                    is_priority,
-                ));
+    if !search_query.is_empty()
+        && let Ok(doc_matches) = crate::db::queries::search_doc_chunks_fts(conn, &search_query, 5)
+    {
+        for m in doc_matches {
+            if seen_files.contains(&m.file_path) {
+                continue;
             }
+            let heading = m.heading.as_deref().unwrap_or("(untitled)");
+            let is_priority = config.docs.priority.iter().any(|p| m.file_path.contains(p));
+            let content = format!("[doc: {} > {}]\n{}", m.file_path, heading, m.content);
+            candidates.push(new_candidate(
+                content.clone(),
+                estimate_tokens(&content),
+                CandidateSource::DocChunk,
+                None,
+                Some(m.file_path),
+                false,
+                is_priority,
+            ));
         }
     }
 }

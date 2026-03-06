@@ -53,7 +53,9 @@ fn test_full_lifecycle() {
     ).unwrap();
 
     // Re-index via incremental flow
-    let prep = index::incremental_reindex_prep(&conn, &g, &file_str).unwrap();
+    let prep = index::incremental_reindex_prep(&conn, &g, &file_str)
+        .unwrap()
+        .expect("file was modified, prep should not be None");
     let inc_stats = index::incremental_reindex_swap(&conn, &mut g, prep).unwrap();
 
     assert!(inc_stats.nodes_added >= 3, "should have 3 nodes after edit");

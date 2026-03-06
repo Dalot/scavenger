@@ -23,7 +23,7 @@ fmt:
 
 # Start daemon in foreground (run from your project dir, not scavenger repo)
 daemon:
-	scavenger daemon
+	scavenger daemon start
 
 # Initialize scavenger in the current project
 init:

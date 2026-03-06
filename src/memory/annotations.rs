@@ -170,10 +170,10 @@ pub fn detect_staleness_for_node(
         )
         .ok();
 
-    if let Some(stored) = stored_checksum {
-        if stored != current_checksum {
-            return Ok(queries::mark_annotations_stale_for_node(conn, node_id)?);
-        }
+    if let Some(stored) = stored_checksum
+        && stored != current_checksum
+    {
+        return Ok(queries::mark_annotations_stale_for_node(conn, node_id)?);
     }
     Ok(0)
 }

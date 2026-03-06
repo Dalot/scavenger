@@ -244,12 +244,12 @@ fn bfs(
     let mut result = Vec::new();
 
     while let Some((idx, depth)) = queue.pop_front() {
-        if depth > 0 {
-            if let Some(w) = graph.graph.node_weight(idx) {
-                result.push(w.id.clone());
-                if result.len() >= budget {
-                    break;
-                }
+        if depth > 0
+            && let Some(w) = graph.graph.node_weight(idx)
+        {
+            result.push(w.id.clone());
+            if result.len() >= budget {
+                break;
             }
         }
 

@@ -45,15 +45,15 @@ pub fn bfs_collect(
     let mut result = Vec::new();
 
     while let Some((idx, depth)) = queue.pop_front() {
-        if depth > 0 {
-            if let Some(w) = graph.graph.node_weight(idx) {
-                if params.builtins_blocklist.contains(&w.name) {
-                    continue;
-                }
-                result.push(w.id.clone());
-                if result.len() >= params.node_budget {
-                    break;
-                }
+        if depth > 0
+            && let Some(w) = graph.graph.node_weight(idx)
+        {
+            if params.builtins_blocklist.contains(&w.name) {
+                continue;
+            }
+            result.push(w.id.clone());
+            if result.len() >= params.node_budget {
+                break;
             }
         }
 

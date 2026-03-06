@@ -51,10 +51,10 @@ impl AntiPatternDetector {
             self.check_untested(conn, graph, session_id, node_id);
         }
 
-        if let Some(ref from) = context.edge_from {
-            if let Some(ref to) = context.edge_to {
-                self.check_cycle_introduced(conn, graph, session_id, from, to);
-            }
+        if let Some(ref from) = context.edge_from
+            && let Some(ref to) = context.edge_to
+        {
+            self.check_cycle_introduced(conn, graph, session_id, from, to);
         }
 
         if let Some(ref file_path) = context.file_path {
@@ -174,18 +174,17 @@ impl AntiPatternDetector {
 
         if let (Some(from_idx), Some(to_idx)) =
             (graph.get_index(&from_nid), graph.get_index(&to_nid))
+            && petgraph::algo::has_path_connecting(&graph.graph, to_idx, from_idx, None)
         {
-            if petgraph::algo::has_path_connecting(&graph.graph, to_idx, from_idx, None) {
-                self.fired.insert(key);
-                let _ = signals::insert_signal(
-                    conn,
-                    SignalKind::CycleIntroduced,
-                    Some(from),
-                    None,
-                    session_id,
-                    Some(&format!("Cycle: {from} → {to} creates back-path")),
-                );
-            }
+            self.fired.insert(key);
+            let _ = signals::insert_signal(
+                conn,
+                SignalKind::CycleIntroduced,
+                Some(from),
+                None,
+                session_id,
+                Some(&format!("Cycle: {from} → {to} creates back-path")),
+            );
         }
     }
 

@@ -285,7 +285,7 @@ async fn ensure_daemon_running(
     if !already_running {
         let exe = std::env::current_exe().unwrap_or_else(|_| "scavenger".into());
         std::process::Command::new(exe)
-            .arg("daemon")
+            .args(["daemon", "start"])
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())

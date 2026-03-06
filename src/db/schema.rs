@@ -1,7 +1,7 @@
 use super::{DbError, DbResult};
 use rusqlite::Connection;
 
-pub const KNOWN_MAX_VERSION: u32 = 2;
+pub const KNOWN_MAX_VERSION: u32 = 3;
 
 /// Ensure the per-branch index database has all required tables, FTS5 virtual
 /// tables, triggers, and indexes. Uses PRAGMA user_version for migration tracking.
@@ -24,6 +24,12 @@ pub fn ensure_branch_schema(conn: &Connection) -> DbResult<()> {
     if current == 1 {
         migrate_v1_to_v2(conn)?;
         conn.pragma_update(None, "user_version", 2)?;
+        current = 2;
+    }
+
+    if current == 2 {
+        migrate_v2_to_v3(conn)?;
+        conn.pragma_update(None, "user_version", 3)?;
     }
 
     Ok(())
@@ -61,6 +67,12 @@ fn create_branch_schema_v1(conn: &Connection) -> DbResult<()> {
 
 fn migrate_v1_to_v2(conn: &Connection) -> DbResult<()> {
     conn.execute_batch(BRANCH_MIGRATION_V1_TO_V2)?;
+    Ok(())
+}
+
+fn migrate_v2_to_v3(conn: &Connection) -> DbResult<()> {
+    // content_hash already present in fresh v1 schemas; only add for upgraded DBs
+    let _ = conn.execute_batch("ALTER TABLE files ADD COLUMN content_hash TEXT;");
     Ok(())
 }
 
@@ -155,7 +167,8 @@ CREATE TABLE IF NOT EXISTS files (
     file_path           TEXT UNIQUE NOT NULL,
     file_type           TEXT NOT NULL,
     raw_token_estimate  INTEGER NOT NULL,
-    last_indexed        INTEGER NOT NULL
+    last_indexed        INTEGER NOT NULL,
+    content_hash        TEXT
 );
 
 -- node_versions table (Layer 1 memory)
@@ -407,7 +420,7 @@ mod tests {
         let ver: u32 = conn
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .unwrap();
-        assert_eq!(ver, 2);
+        assert_eq!(ver, 3);
     }
 
     #[test]

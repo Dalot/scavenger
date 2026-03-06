@@ -29,8 +29,11 @@ enum Commands {
     /// Initialize Scavenger on a project
     Init,
 
-    /// Start the daemon in the foreground
-    Daemon,
+    /// Manage the daemon process
+    Daemon {
+        #[command(subcommand)]
+        command: DaemonCommands,
+    },
 
     /// Manually re-index files
     Index {
@@ -170,6 +173,18 @@ enum Commands {
 }
 
 #[derive(Subcommand)]
+enum DaemonCommands {
+    /// Start the daemon in the foreground
+    Start,
+    /// Stop a running daemon
+    Stop,
+    /// Stop and restart the daemon (foreground)
+    Restart,
+    /// Show daemon status (running, PID, branch, uptime)
+    Status,
+}
+
+#[derive(Subcommand)]
 enum GraphCommands {
     /// Show node/edge counts and centrality top-10
     Stats,
@@ -282,7 +297,7 @@ fn main() {
 
     let result = match cli.command {
         Commands::Init => cmd_init(),
-        Commands::Daemon => cmd_daemon(),
+        Commands::Daemon { command } => cmd_daemon(command),
         Commands::Index { path } => cmd_index(path),
         Commands::Capsule {
             file,
@@ -430,7 +445,7 @@ fn cmd_init() -> Result<(), Box<dyn std::error::Error>> {
         "Claude Code:".cyan().bold(),
     );
     eprintln!(
-        "  {} MCP tools + hooks registered in .cursor/ — works automatically.",
+        "  {} MCP tools + hooks registered in .cursor/ — reload the Cursor window to activate.",
         "Cursor:".cyan().bold(),
     );
     eprintln!(
@@ -438,10 +453,23 @@ fn cmd_init() -> Result<(), Box<dyn std::error::Error>> {
         "Other tools:".cyan().bold(),
     );
     eprintln!("\nThe daemon starts and stops automatically with each session.");
+    eprintln!("Manual control: scavenger daemon {{start|stop|restart|status}}");
     Ok(())
 }
 
-fn cmd_daemon() -> Result<(), Box<dyn std::error::Error>> {
+fn cmd_daemon(command: DaemonCommands) -> Result<(), Box<dyn std::error::Error>> {
+    match command {
+        DaemonCommands::Start => cmd_daemon_start(),
+        DaemonCommands::Stop => cmd_daemon_stop(),
+        DaemonCommands::Restart => {
+            let _ = cmd_daemon_stop();
+            cmd_daemon_start()
+        }
+        DaemonCommands::Status => cmd_daemon_status(),
+    }
+}
+
+fn cmd_daemon_start() -> Result<(), Box<dyn std::error::Error>> {
     let project_root = std::env::current_dir()?;
     let scavenger_dir = db::scavenger_dir(&project_root);
     if !scavenger_dir.exists() {
@@ -449,6 +477,57 @@ fn cmd_daemon() -> Result<(), Box<dyn std::error::Error>> {
     }
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(daemon::run_daemon(project_root))
+}
+
+fn cmd_daemon_stop() -> Result<(), Box<dyn std::error::Error>> {
+    let project_root = std::env::current_dir()?;
+    let scavenger_dir = db::scavenger_dir(&project_root);
+    let pid_path = scavenger_dir.join("daemon.pid");
+    if let Some(pid) = read_pid(&pid_path) {
+        eprintln!("Stopping daemon (PID {pid})...");
+        kill_daemon_and_wait(pid, &scavenger_dir);
+        eprintln!("{}", "Daemon stopped.".green().bold());
+    } else {
+        eprintln!("No running daemon found.");
+    }
+    Ok(())
+}
+
+fn cmd_daemon_status() -> Result<(), Box<dyn std::error::Error>> {
+    let project_root = std::env::current_dir()?;
+    let scavenger_dir = db::scavenger_dir(&project_root);
+    let pid_path = scavenger_dir.join("daemon.pid");
+
+    if !is_daemon_running(&pid_path) {
+        println!("{}", "Daemon is not running.".yellow());
+        return Ok(());
+    }
+
+    let pid = read_pid(&pid_path).unwrap_or(0);
+    println!("{} (PID {})", "Daemon is running.".green().bold(), pid);
+
+    let socket_path = scavenger_dir.join("daemon.sock");
+    if socket_path.exists() {
+        let rt = tokio::runtime::Runtime::new()?;
+        let request = serde_json::json!({ "method": "status" });
+        if let Ok(status) = rt.block_on(daemon::socket::send_request(&socket_path, &request)) {
+            if let Some(branch) = status.get("branch").and_then(|v| v.as_str()) {
+                println!("  Branch:        {}", branch.cyan());
+            }
+            if let Some(state) = status.get("reindex_state").and_then(|v| v.as_str()) {
+                println!("  Reindex state: {state}");
+            }
+            if let Some(nodes) = status.get("node_count").and_then(|v| v.as_u64()) {
+                let edges = status
+                    .get("edge_count")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
+                println!("  Graph:         {nodes} nodes, {edges} edges");
+            }
+        }
+    }
+
+    Ok(())
 }
 
 fn cmd_index(path: Option<PathBuf>) -> Result<(), Box<dyn std::error::Error>> {
@@ -681,7 +760,7 @@ fn run_doctor_once(verbose: bool, format: &OutputFormat) -> Result<(), Box<dyn s
     checks.push(DiagCheck::new("Daemon process", "Process", pid_alive));
     if !pid_alive {
         recommendations
-            .push("Start the daemon: scavenger daemon (or trigger via session hook)".into());
+            .push("Start the daemon: scavenger daemon start (or trigger via session hook)".into());
     }
     checks.push(DiagCheck::new("PID file", "Process", pid_path.exists()));
 
@@ -692,7 +771,9 @@ fn run_doctor_once(verbose: bool, format: &OutputFormat) -> Result<(), Box<dyn s
         sock.exists(),
     ));
     if pid_alive && !sock.exists() {
-        recommendations.push("Socket missing despite running daemon — restart: scavenger hook session-end && scavenger daemon".into());
+        recommendations.push(
+            "Socket missing despite running daemon — restart: scavenger daemon restart".into(),
+        );
     }
 
     // Config check
@@ -765,12 +846,12 @@ fn run_doctor_once(verbose: bool, format: &OutputFormat) -> Result<(), Box<dyn s
                     "WARN" => log_warnings += 1,
                     _ => {}
                 }
-                if let Some(fields) = parsed.get("fields").and_then(|v| v.as_object()) {
-                    if fields.get("message").and_then(|v| v.as_str()) == Some("capsule served") {
-                        total_capsules += 1;
-                        if fields.get("empty").and_then(|v| v.as_bool()) == Some(true) {
-                            empty_capsules += 1;
-                        }
+                if let Some(fields) = parsed.get("fields").and_then(|v| v.as_object())
+                    && fields.get("message").and_then(|v| v.as_str()) == Some("capsule served")
+                {
+                    total_capsules += 1;
+                    if fields.get("empty").and_then(|v| v.as_bool()) == Some(true) {
+                        empty_capsules += 1;
                     }
                 }
             }
@@ -1200,7 +1281,7 @@ fn cmd_hook(command: HookCommands) -> Result<(), Box<dyn std::error::Error>> {
             if !is_daemon_running(&pid_path) {
                 let exe = std::env::current_exe().unwrap_or_else(|_| "scavenger".into());
                 std::process::Command::new(exe)
-                    .arg("daemon")
+                    .args(["daemon", "start"])
                     .stdin(std::process::Stdio::null())
                     .stdout(std::process::Stdio::null())
                     .stderr(std::process::Stdio::null())

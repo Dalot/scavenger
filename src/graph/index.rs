@@ -41,6 +41,7 @@ pub struct FileParseResult {
     pub symbols: Vec<ExtractedSymbol>,
     pub edges: Vec<ExtractedEdge>,
     pub raw_token_estimate: u32,
+    pub content_hash: String,
 }
 
 /// Detect language from file extension.
@@ -101,6 +102,7 @@ pub fn parse_file(path: &Path, content: &str) -> Option<FileParseResult> {
 
     let file_path = path.to_string_lossy().to_string();
     let raw_token_estimate = (content.len() / 4) as u32;
+    let content_hash = format!("{:x}", md5::compute(content.as_bytes()));
 
     let mut symbols = Vec::new();
     let mut edges = Vec::new();
@@ -119,6 +121,7 @@ pub fn parse_file(path: &Path, content: &str) -> Option<FileParseResult> {
         symbols,
         edges,
         raw_token_estimate,
+        content_hash,
     })
 }
 
@@ -479,18 +482,17 @@ fn extract_call_edges(
 ) {
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
-        if child.kind() == "call_expression" || child.kind() == "call" {
-            if let Some(func) = child.child_by_field_name("function") {
-                if let Ok(callee_name) = func.utf8_text(source) {
-                    let name = callee_name.split('.').next_back().unwrap_or(callee_name);
-                    edges.push(ExtractedEdge {
-                        from_id: from_id.clone(),
-                        to_name: name.to_string(),
-                        kind: EdgeKind::Calls,
-                        confidence: Confidence::Heuristic,
-                    });
-                }
-            }
+        if (child.kind() == "call_expression" || child.kind() == "call")
+            && let Some(func) = child.child_by_field_name("function")
+            && let Ok(callee_name) = func.utf8_text(source)
+        {
+            let name = callee_name.split('.').next_back().unwrap_or(callee_name);
+            edges.push(ExtractedEdge {
+                from_id: from_id.clone(),
+                to_name: name.to_string(),
+                kind: EdgeKind::Calls,
+                confidence: Confidence::Heuristic,
+            });
         }
         extract_call_edges(child, source, from_id, _from_name, edges);
     }
@@ -526,12 +528,13 @@ pub fn bulk_index(
     let tx = conn.unchecked_transaction()?;
 
     for result in &results {
-        queries::upsert_file(
+        queries::upsert_file_with_hash(
             &tx,
             &result.file_path,
             "code",
             result.raw_token_estimate,
             now,
+            Some(&result.content_hash),
         )?;
         total_files += 1;
 
@@ -624,6 +627,7 @@ pub struct ReindexPrep {
     #[allow(dead_code)]
     pub name_to_new_id: HashMap<String, NodeId>,
     pub similarity_matches: Vec<super::similarity::SimilarityMatch>,
+    pub content_hash: Option<String>,
 }
 
 /// Incremental reindex: 13-step flow with split-phase concurrency.
@@ -631,16 +635,93 @@ pub struct ReindexPrep {
 /// Phase 1 (Prep — no lock): re-parse, build new structures, diff, similarity.
 /// Phase 2 (Swap — write lock): commit SQLite + graph mutations.
 /// Phase 3 (Deferred): PageRank recomputed once per batch, not per file.
+/// Returns `Ok(None)` when the file content is unchanged (hash match), skipping reindex.
 pub fn incremental_reindex_prep(
     conn: &Connection,
     graph: &super::GraphState,
     file_path: &str,
-) -> Result<ReindexPrep, Box<dyn std::error::Error + Send + Sync>> {
+) -> Result<Option<ReindexPrep>, Box<dyn std::error::Error + Send + Sync>> {
+    // Step 0a: Quick mtime check — skip without reading the file if it hasn't
+    // been modified since the last index. This is a stat() call (~µs), much
+    // cheaper than read+hash, and doesn't update atime (avoids notify feedback).
+    if let Ok(metadata) = std::fs::metadata(file_path) {
+        let fs_mtime = metadata
+            .modified()
+            .ok()
+            .and_then(|t| t.duration_since(SystemTime::UNIX_EPOCH).ok())
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or(0);
+        let last_indexed_result = queries::get_file_last_indexed(conn, file_path);
+        match &last_indexed_result {
+            Ok(Some(last_indexed)) => {
+                if *last_indexed > fs_mtime {
+                    return Ok(None);
+                }
+                tracing::info!(
+                    file = %file_path,
+                    last_indexed,
+                    fs_mtime,
+                    "mtime check: file appears stale"
+                );
+            }
+            Ok(None) => {
+                tracing::info!(
+                    file = %file_path,
+                    fs_mtime,
+                    "mtime check: no DB row for file path"
+                );
+            }
+            Err(e) => {
+                tracing::warn!(
+                    file = %file_path,
+                    error = %e,
+                    "mtime check: DB query failed"
+                );
+            }
+        }
+    }
+
+    // Step 0b: Content-hash dedup — catches edits that revert to previous content
+    let content = std::fs::read_to_string(file_path).ok();
+    let content_hash = content
+        .as_ref()
+        .map(|c| format!("{:x}", md5::compute(c.as_bytes())));
+
+    if let Some(ref hash) = content_hash {
+        let stored_result = queries::get_file_content_hash(conn, file_path);
+        match &stored_result {
+            Ok(Some(stored_hash)) => {
+                if hash == stored_hash {
+                    return Ok(None);
+                }
+                tracing::info!(
+                    file = %file_path,
+                    computed = %hash,
+                    stored = %stored_hash,
+                    "hash check: content changed"
+                );
+            }
+            Ok(None) => {
+                tracing::info!(
+                    file = %file_path,
+                    computed = %hash,
+                    "hash check: no stored hash for file path"
+                );
+            }
+            Err(e) => {
+                tracing::warn!(
+                    file = %file_path,
+                    error = %e,
+                    "hash check: DB query failed"
+                );
+            }
+        }
+    }
+
     // Step 1: Collect old NodeIds for this file
     let old_node_ids = queries::get_node_ids_for_file(conn, file_path)?;
 
     // Step 2: Re-parse with tree-sitter
-    let content = std::fs::read_to_string(file_path).ok();
     let parse_result = content
         .as_deref()
         .and_then(|c| parse_file(std::path::Path::new(file_path), c));
@@ -704,13 +785,14 @@ pub fn incremental_reindex_prep(
         Vec::new()
     };
 
-    Ok(ReindexPrep {
+    Ok(Some(ReindexPrep {
         file_path: file_path.to_string(),
         parse_result,
         old_node_ids,
         name_to_new_id,
         similarity_matches,
-    })
+        content_hash,
+    }))
 }
 
 /// Phase 2 (Swap): commit changes under write lock. Target: ~5-15ms.
@@ -769,7 +851,14 @@ pub fn incremental_reindex_swap(
 
     // Step 9-11: Insert new nodes and edges
     if let Some(ref pr) = prep.parse_result {
-        queries::upsert_file(&tx, &prep.file_path, "code", pr.raw_token_estimate, now)?;
+        queries::upsert_file_with_hash(
+            &tx,
+            &prep.file_path,
+            "code",
+            pr.raw_token_estimate,
+            now,
+            prep.content_hash.as_deref(),
+        )?;
 
         for sym in &pr.symbols {
             queries::upsert_node(
@@ -889,14 +978,13 @@ pub fn cross_file_affected(graph: &super::GraphState, changed_file: &str) -> Vec
     let mut affected = std::collections::HashSet::new();
 
     for idx in graph.graph.node_indices() {
-        if let Some(w) = graph.graph.node_weight(idx) {
-            if w.file_path == changed_path {
-                if let Some(paths) = graph.reverse_index.get(&w.id) {
-                    for p in paths {
-                        if p != &changed_path {
-                            affected.insert(p.clone());
-                        }
-                    }
+        if let Some(w) = graph.graph.node_weight(idx)
+            && w.file_path == changed_path
+            && let Some(paths) = graph.reverse_index.get(&w.id)
+        {
+            for p in paths {
+                if p != &changed_path {
+                    affected.insert(p.clone());
                 }
             }
         }

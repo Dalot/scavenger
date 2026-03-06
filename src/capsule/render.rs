@@ -113,14 +113,13 @@ pub fn render(
         sections.push(format!("{}\n{}", header, body.join("\n")));
     }
 
-    if remaining_budget > 200 {
-        if let Some(tb) = target_body {
-            if let Ok(body_text) = read_body_from_file(&tb.file_path, tb.line_start, tb.line_end) {
-                let body_tokens = (body_text.len() / 4) as u32;
-                if body_tokens <= remaining_budget {
-                    sections.push(format!("[BODY] {}\n{}", tb.name, body_text));
-                }
-            }
+    if remaining_budget > 200
+        && let Some(tb) = target_body
+        && let Ok(body_text) = read_body_from_file(&tb.file_path, tb.line_start, tb.line_end)
+    {
+        let body_tokens = (body_text.len() / 4) as u32;
+        if body_tokens <= remaining_budget {
+            sections.push(format!("[BODY] {}\n{}", tb.name, body_text));
         }
     }
 
