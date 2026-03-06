@@ -518,7 +518,10 @@ fn cmd_daemon_status() -> Result<(), Box<dyn std::error::Error>> {
                 println!("  Reindex state: {state}");
             }
             if let Some(nodes) = status.get("node_count").and_then(|v| v.as_u64()) {
-                let edges = status.get("edge_count").and_then(|v| v.as_u64()).unwrap_or(0);
+                let edges = status
+                    .get("edge_count")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
                 println!("  Graph:         {nodes} nodes, {edges} edges");
             }
         }
@@ -768,7 +771,9 @@ fn run_doctor_once(verbose: bool, format: &OutputFormat) -> Result<(), Box<dyn s
         sock.exists(),
     ));
     if pid_alive && !sock.exists() {
-        recommendations.push("Socket missing despite running daemon — restart: scavenger daemon restart".into());
+        recommendations.push(
+            "Socket missing despite running daemon — restart: scavenger daemon restart".into(),
+        );
     }
 
     // Config check

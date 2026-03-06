@@ -128,15 +128,50 @@ pub fn upsert_file(
     raw_token_estimate: u32,
     last_indexed: i64,
 ) -> DbResult<()> {
+    upsert_file_with_hash(
+        conn,
+        file_path,
+        file_type,
+        raw_token_estimate,
+        last_indexed,
+        None,
+    )
+}
+
+pub fn upsert_file_with_hash(
+    conn: &Connection,
+    file_path: &str,
+    file_type: &str,
+    raw_token_estimate: u32,
+    last_indexed: i64,
+    content_hash: Option<&str>,
+) -> DbResult<()> {
     conn.execute(
-        "INSERT INTO files (file_path, file_type, raw_token_estimate, last_indexed)
-         VALUES (?1, ?2, ?3, ?4)
+        "INSERT INTO files (file_path, file_type, raw_token_estimate, last_indexed, content_hash)
+         VALUES (?1, ?2, ?3, ?4, ?5)
          ON CONFLICT(file_path) DO UPDATE SET
             file_type=excluded.file_type, raw_token_estimate=excluded.raw_token_estimate,
-            last_indexed=excluded.last_indexed",
-        params![file_path, file_type, raw_token_estimate, last_indexed],
+            last_indexed=excluded.last_indexed, content_hash=excluded.content_hash",
+        params![
+            file_path,
+            file_type,
+            raw_token_estimate,
+            last_indexed,
+            content_hash
+        ],
     )?;
     Ok(())
+}
+
+pub fn get_file_content_hash(conn: &Connection, file_path: &str) -> DbResult<Option<String>> {
+    let result = conn
+        .query_row(
+            "SELECT content_hash FROM files WHERE file_path = ?1",
+            params![file_path],
+            |row| row.get(0),
+        )
+        .optional()?;
+    Ok(result.flatten())
 }
 
 pub fn get_file_last_indexed(conn: &Connection, file_path: &str) -> DbResult<Option<i64>> {
