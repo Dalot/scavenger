@@ -346,22 +346,28 @@ fn gather_doc_chunks(
 ) {
     let mut seen_files = std::collections::HashSet::new();
 
-    // Priority docs are unconditionally included (design §6.5)
-    for priority_name in &config.docs.priority {
-        if let Ok(chunks) = crate::db::queries::get_doc_chunks_for_file(conn, priority_name) {
-            for m in chunks {
-                let heading = m.heading.as_deref().unwrap_or("(untitled)");
-                let content = format!("[doc: {} > {}]\n{}", m.file_path, heading, m.content);
-                candidates.push(new_candidate(
-                    content.clone(),
-                    estimate_tokens(&content),
-                    CandidateSource::DocChunk,
-                    None,
-                    Some(m.file_path.clone()),
-                    false,
-                    true,
-                ));
-                seen_files.insert(m.file_path);
+    // Priority docs are unconditionally included ONLY for project-level queries
+    // (queries without a specific target node). For file/symbol-specific queries,
+    // priority docs must be relevant via FTS5 to avoid noise.
+    let is_project_level_query = query_result.target.is_none();
+
+    if is_project_level_query {
+        for priority_name in &config.docs.priority {
+            if let Ok(chunks) = crate::db::queries::get_doc_chunks_for_file(conn, priority_name) {
+                for m in chunks {
+                    let heading = m.heading.as_deref().unwrap_or("(untitled)");
+                    let content = format!("[doc: {} > {}]\n{}", m.file_path, heading, m.content);
+                    candidates.push(new_candidate(
+                        content.clone(),
+                        estimate_tokens(&content),
+                        CandidateSource::DocChunk,
+                        None,
+                        Some(m.file_path.clone()),
+                        false,
+                        true,
+                    ));
+                    seen_files.insert(m.file_path);
+                }
             }
         }
     }
@@ -563,5 +569,73 @@ mod tests {
         assert_eq!(annotation_prefix("context", false), "[CONTEXT NOTE]");
         assert_eq!(annotation_prefix("fact", true), "[STALE]");
         assert_eq!(annotation_prefix("pitfall", true), "[STALE]");
+    }
+
+    #[test]
+    fn test_priority_docs_only_for_project_level_queries() {
+        use crate::config::Config;
+        use crate::query::QueryResult;
+        use crate::query::intent::{Intent, IntentResult};
+
+        let (conn, _graph) = setup();
+
+        // Insert a priority doc chunk with correct schema
+        conn.execute(
+            "INSERT INTO doc_chunks (file_path, chunk_index, heading, start_line, end_line, content, token_estimate, last_indexed, content_hash)
+             VALUES ('README.md', 0, 'Overview', 1, 5, 'This is a README overview', 100, 0, 'hash123')",
+            [],
+        ).unwrap();
+
+        let config = Config::default(); // Has README.md as priority
+        let intent = IntentResult::single(Intent::Understand);
+
+        // Test 1: File-specific query (with target) should NOT include priority docs
+        let query_with_target = QueryResult {
+            target: Some(NodeId("n1".to_string())),
+            intent: intent.clone(),
+            neighbor_ids: vec![],
+            search_results: vec![],
+        };
+
+        let mut candidates = Vec::new();
+        gather_doc_chunks(&conn, &config, &query_with_target, &mut candidates);
+
+        let doc_chunks: Vec<_> = candidates
+            .iter()
+            .filter(|c| c.source == CandidateSource::DocChunk)
+            .collect();
+
+        assert_eq!(
+            doc_chunks.len(),
+            0,
+            "file-specific query should not include priority docs unconditionally"
+        );
+
+        // Test 2: Project-level query (no target) SHOULD include priority docs
+        let query_without_target = QueryResult {
+            target: None,
+            intent,
+            neighbor_ids: vec![],
+            search_results: vec![],
+        };
+
+        candidates.clear();
+        gather_doc_chunks(&conn, &config, &query_without_target, &mut candidates);
+
+        let doc_chunks: Vec<_> = candidates
+            .iter()
+            .filter(|c| c.source == CandidateSource::DocChunk)
+            .collect();
+
+        assert_eq!(
+            doc_chunks.len(),
+            1,
+            "project-level query should include priority docs unconditionally"
+        );
+
+        assert!(
+            doc_chunks[0].content.contains("README.md"),
+            "doc chunk should be from README.md"
+        );
     }
 }
