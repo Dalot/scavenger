@@ -54,7 +54,7 @@ tokio-rusqlite = "0.6"
 tokio = { version = "1", features = ["full"] }
 
 # File watching
-notify = "7"
+notify = "8"
 notify-debouncer-full = "0.7"
 ignore = "0.4"
 
