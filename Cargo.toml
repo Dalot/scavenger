@@ -97,7 +97,7 @@ libc = "0.2.184"
 
 # OpenTelemetry (behind feature flag)
 opentelemetry = { version = "0.27", optional = true }
-opentelemetry_sdk = { version = "0.27", features = ["rt-tokio"], optional = true }
+opentelemetry_sdk = { version = "0.31", features = ["rt-tokio"], optional = true }
 opentelemetry-otlp = { version = "0.27", features = ["tonic"], optional = true }
 tracing-opentelemetry = { version = "0.32", optional = true }
 
