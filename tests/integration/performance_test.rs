@@ -107,7 +107,9 @@ fn test_incremental_reindex_under_500ms() {
 
     let file_str = path.to_string_lossy().to_string();
     let start = Instant::now();
-    let prep = index::incremental_reindex_prep(&conn, &g, &file_str).unwrap();
+    let prep = index::incremental_reindex_prep(&conn, &g, &file_str)
+        .unwrap()
+        .expect("file was modified, prep should not be None");
     let _stats = index::incremental_reindex_swap(&conn, &mut g, prep).unwrap();
     let elapsed = start.elapsed();
 

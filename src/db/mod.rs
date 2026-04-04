@@ -73,7 +73,7 @@ mod tests {
         let ver: u32 = conn
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .unwrap();
-        assert_eq!(ver, 2);
+        assert_eq!(ver, 3);
     }
 
     #[test]

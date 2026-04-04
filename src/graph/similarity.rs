@@ -109,17 +109,16 @@ fn edge_neighborhood_jaccard(old_set: &HashSet<NodeId>, new_set: &HashSet<NodeId
 fn extract_param_names(sig: &str) -> HashSet<String> {
     let mut params = HashSet::new();
     // Extract content between parentheses
-    if let Some(start) = sig.find('(') {
-        if let Some(end) = sig.rfind(')') {
-            let inner = &sig[start + 1..end];
-            for param in inner.split(',') {
-                let trimmed = param.trim();
-                if let Some(name) = trimmed.split(':').next() {
-                    let name = name.split_whitespace().last().unwrap_or("").trim();
-                    if !name.is_empty() && name != "self" && name != "&self" && name != "&mut self"
-                    {
-                        params.insert(name.to_string());
-                    }
+    if let Some(start) = sig.find('(')
+        && let Some(end) = sig.rfind(')')
+    {
+        let inner = &sig[start + 1..end];
+        for param in inner.split(',') {
+            let trimmed = param.trim();
+            if let Some(name) = trimmed.split(':').next() {
+                let name = name.split_whitespace().last().unwrap_or("").trim();
+                if !name.is_empty() && name != "self" && name != "&self" && name != "&mut self" {
+                    params.insert(name.to_string());
                 }
             }
         }

@@ -59,17 +59,17 @@ pub fn run(scavenger_dir: &Path, interval_secs: u64) -> Result<(), Box<dyn std::
 
         terminal.draw(|f| ui(f, &app))?;
 
-        if event::poll(Duration::from_millis(100))? {
-            if let Event::Key(key) = event::read()? {
-                match key.code {
-                    KeyCode::Char('q') | KeyCode::Esc => break,
-                    KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => break,
-                    KeyCode::Char('r') => {
-                        refresh_data(&mut app);
-                        app.last_refresh = Instant::now();
-                    }
-                    _ => {}
+        if event::poll(Duration::from_millis(100))?
+            && let Event::Key(key) = event::read()?
+        {
+            match key.code {
+                KeyCode::Char('q') | KeyCode::Esc => break,
+                KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => break,
+                KeyCode::Char('r') => {
+                    refresh_data(&mut app);
+                    app.last_refresh = Instant::now();
                 }
+                _ => {}
             }
         }
     }
@@ -222,7 +222,7 @@ fn ui(f: &mut ratatui::Frame, app: &AppState) {
                 Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
             )),
             Line::from(""),
-            Line::from("Start the daemon with: scavenger daemon"),
+            Line::from("Start the daemon with: scavenger daemon start"),
         ])
         .block(Block::default().borders(Borders::ALL).title("Status"));
         f.render_widget(error_block, main_layout[1]);
