@@ -1,0 +1,16 @@
+[relevance]
+min_recall = 0.80
+min_precision = 0.60
+
+[accuracy]
+min_intent_accuracy = 0.90
+min_ndcg_at_5 = 0.75
+
+[performance]
+max_index_time_per_100_files_ms = 5000
+max_capsule_latency_p95_ms = 200
+max_reindex_time_ms = 500
+
+[agent]
+min_token_reduction_pct = 20
+min_success_rate = 0.80

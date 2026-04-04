@@ -9,7 +9,7 @@ repository = "https://github.com/Dalot/scavenger"
 readme = "README.md"
 keywords = ["ast", "dependency-graph", "claude", "code-intelligence", "tree-sitter"]
 categories = ["command-line-utilities", "development-tools"]
-exclude = ["benchmark/", "scripts/", "specs/", ".cx-spec/", "tests/fixtures/", ".rdalot/"]
+exclude = ["scripts/", "specs/", ".cx-spec/", "tests/fixtures/", ".rdalot/"]
 
 [lib]
 name = "scavenger"
@@ -107,8 +107,25 @@ telemetry = ["opentelemetry", "opentelemetry_sdk", "opentelemetry-otlp", "tracin
 
 [dev-dependencies]
 tempfile = "3"
+criterion = { version = "0.5", features = ["html_reports"] }
+serde_yaml = "0.9"
 
 [profile.release]
 lto = true
 strip = true
 codegen-units = 1
+
+[[bench]]
+name = "relevance_bench"
+path = "src/bench/relevance_bench.rs"
+harness = false
+
+[[bench]]
+name = "accuracy_bench"
+path = "src/bench/accuracy_bench.rs"
+harness = false
+
+[[bench]]
+name = "performance_bench"
+path = "src/bench/performance_bench.rs"
+harness = false
