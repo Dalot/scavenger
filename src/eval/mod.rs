@@ -6,7 +6,7 @@ pub mod reporter;
 pub mod runner;
 pub mod thresholds;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 #[derive(Debug, Clone, Serialize)]
@@ -27,11 +27,19 @@ pub struct SuiteSummary {
     pub averages: HashMap<String, f64>,
 }
 
+/// Evaluation tier — distinguishes fast component evals from slower agent-based evals.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum EvalTier {
+    Component,
+    Agent,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct EvalRun {
     pub run_id: String,
     pub scavenger_version: String,
-    pub tier: String,
+    pub tier: EvalTier,
     pub suite: String,
     pub corpus: String,
     pub results: Vec<CaseResult>,
