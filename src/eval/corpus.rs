@@ -52,15 +52,42 @@ pub fn load_corpus(root: &Path) -> Result<Vec<CorpusEntry>, String> {
 }
 
 fn is_project_dir(path: &Path) -> bool {
-    has_source_files(path)
-        || path.join("Cargo.toml").exists()
+    // Check for build-tool markers at the top level
+    if path.join("Cargo.toml").exists()
         || path.join("package.json").exists()
         || path.join("go.mod").exists()
         || path.join("pyproject.toml").exists()
+    {
+        return true;
+    }
+    // Check for source files only in immediate children (not recursively),
+    // so a directory of projects isn't mistaken for a single project.
+    has_immediate_source_files(path)
 }
 
-fn has_source_files(path: &Path) -> bool {
-    count_source_files(path) > 0
+fn has_immediate_source_files(path: &Path) -> bool {
+    if let Ok(entries) = fs::read_dir(path) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_file() && is_source_file(&path) {
+                return true;
+            }
+            // Also check src/ or lib/ directory
+            if path.is_dir()
+                && let Some(name) = path.file_name()
+                && (name == "src" || name == "lib")
+                && let Ok(src_entries) = fs::read_dir(&path)
+            {
+                for src_entry in src_entries.flatten() {
+                    let src_path = src_entry.path();
+                    if src_path.is_file() && is_source_file(&src_path) {
+                        return true;
+                    }
+                }
+            }
+        }
+    }
+    false
 }
 
 fn count_source_files(path: &Path) -> usize {
@@ -75,6 +102,7 @@ fn count_source_files(path: &Path) -> usize {
                         || name == "target"
                         || name == "node_modules"
                         || name == ".git"
+                        || name == "build"
                     {
                         continue;
                     }
