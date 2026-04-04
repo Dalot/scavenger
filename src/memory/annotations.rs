@@ -2,6 +2,7 @@
 use rusqlite::Connection;
 use sha2::{Digest, Sha256};
 
+use crate::db;
 use crate::db::queries;
 
 /// Anchor types for annotations.
@@ -77,7 +78,7 @@ pub fn upsert_annotation(
     text: &str,
     tags: Option<&str>,
     kind: AnnotationKind,
-) -> Result<UpsertResult, Box<dyn std::error::Error>> {
+) -> db::DbResult<UpsertResult> {
     let now = now_secs();
     let at_str = anchor_type.map(|a| a.as_str());
     let hash = compute_content_hash(at_str, anchor_value, text);
@@ -128,7 +129,7 @@ pub fn read_by_anchor(
     conn: &Connection,
     anchor_type: &str,
     anchor_value: &str,
-) -> Result<Vec<AnnotationView>, Box<dyn std::error::Error>> {
+) -> db::DbResult<Vec<AnnotationView>> {
     let rows = queries::get_annotations_for_anchor(conn, anchor_type, anchor_value)?;
     Ok(rows
         .into_iter()
@@ -146,7 +147,7 @@ pub fn read_by_anchor(
 }
 
 /// Delete an annotation by ID. Also cleans up any relationship edges.
-pub fn delete_annotation(conn: &Connection, id: &str) -> Result<bool, Box<dyn std::error::Error>> {
+pub fn delete_annotation(conn: &Connection, id: &str) -> db::DbResult<bool> {
     let _ = queries::delete_annotation_edges(conn, id);
     let deleted = conn.execute(
         "DELETE FROM annotations WHERE id = ?1",
@@ -161,7 +162,7 @@ pub fn detect_staleness_for_node(
     conn: &Connection,
     node_id: &str,
     current_checksum: &[u8],
-) -> Result<u64, Box<dyn std::error::Error>> {
+) -> db::DbResult<u64> {
     let stored_checksum: Option<Vec<u8>> = conn
         .query_row(
             "SELECT checksum FROM nodes WHERE id = ?1",
@@ -173,16 +174,13 @@ pub fn detect_staleness_for_node(
     if let Some(stored) = stored_checksum
         && stored != current_checksum
     {
-        return Ok(queries::mark_annotations_stale_for_node(conn, node_id)?);
+        return queries::mark_annotations_stale_for_node(conn, node_id);
     }
     Ok(0)
 }
 
 /// Detect staleness for file-anchored annotations by mtime.
-pub fn detect_staleness_for_file(
-    conn: &Connection,
-    file_path: &str,
-) -> Result<u64, Box<dyn std::error::Error>> {
+pub fn detect_staleness_for_file(conn: &Connection, file_path: &str) -> db::DbResult<u64> {
     let fs_mtime = std::fs::metadata(file_path)
         .ok()
         .and_then(|m| m.modified().ok())
@@ -200,7 +198,7 @@ pub fn detect_staleness_for_file(
 
 /// Orphan cleanup: delete node-anchored annotations where the NodeId
 /// no longer exists and the annotation has been stale for >30 days.
-pub fn cleanup_orphans(conn: &Connection) -> Result<u64, Box<dyn std::error::Error>> {
+pub fn cleanup_orphans(conn: &Connection) -> db::DbResult<u64> {
     let cutoff = now_secs() - 30 * 86400;
     let deleted = conn.execute(
         "DELETE FROM annotations WHERE anchor_type = 'node'
@@ -212,11 +210,7 @@ pub fn cleanup_orphans(conn: &Connection) -> Result<u64, Box<dyn std::error::Err
 }
 
 /// Search annotations via FTS5.
-pub fn search_fts(
-    conn: &Connection,
-    query: &str,
-    limit: u32,
-) -> Result<Vec<String>, Box<dyn std::error::Error>> {
+pub fn search_fts(conn: &Connection, query: &str, limit: u32) -> db::DbResult<Vec<String>> {
     let matches = queries::search_annotations_fts(conn, query, limit)?;
     Ok(matches.into_iter().map(|m| m.id).collect())
 }
@@ -243,11 +237,7 @@ pub fn compute_content_hash(
 }
 
 /// Decay quality for all annotations anchored to a node (called on THRASHING/DEAD_END).
-pub fn decay_quality_for_node(
-    conn: &Connection,
-    node_id: &str,
-    factor: f64,
-) -> Result<u64, Box<dyn std::error::Error>> {
+pub fn decay_quality_for_node(conn: &Connection, node_id: &str, factor: f64) -> db::DbResult<u64> {
     let changed = conn.execute(
         "UPDATE annotations SET quality = quality * ?1
          WHERE anchor_type = 'node' AND anchor_value = ?2",
