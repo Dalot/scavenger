@@ -1,4 +1,4 @@
-use scavenger::eval::{EvalError, corpus::load_corpus};
+use scavenger::eval::{EvalError, load_corpus};
 use std::fs;
 use std::path::PathBuf;
 
