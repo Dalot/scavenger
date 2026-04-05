@@ -3,6 +3,7 @@ pub mod capsule;
 pub mod config;
 pub mod daemon;
 pub mod db;
+pub mod eval;
 pub mod graph;
 pub mod hooks;
 pub mod memory;

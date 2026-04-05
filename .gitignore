@@ -24,4 +24,6 @@ Thumbs.db
 
 # Scavenger runtime
 .scavenger/
+
+# Worktrees
 .worktrees/

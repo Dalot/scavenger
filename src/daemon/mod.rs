@@ -69,8 +69,8 @@ pub fn init_tracing(scavenger_dir: &Path) {
             }
         };
 
-        let provider = opentelemetry_sdk::trace::TracerProvider::builder()
-            .with_batch_exporter(exporter, opentelemetry_sdk::runtime::Tokio)
+        let provider = opentelemetry_sdk::trace::SdkTracerProvider::builder()
+            .with_batch_exporter(exporter)
             .build();
 
         let tracer = provider.tracer("scavenger");
