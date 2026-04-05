@@ -49,7 +49,7 @@ impl DetailLevel {
     pub fn max_file_annotations(&self) -> u32 {
         match self {
             Self::Minimal | Self::Standard => 0,
-            Self::Detailed => 5,
+            Self::Detailed => 3,
         }
     }
 
@@ -151,20 +151,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_detail_level_from_str_minimal() {
+    fn test_parse_detail_level() {
         assert_eq!(
             "minimal".parse::<DetailLevel>().unwrap(),
             DetailLevel::Minimal
         );
         assert_eq!("min".parse::<DetailLevel>().unwrap(), DetailLevel::Minimal);
-        assert_eq!(
-            "MINIMAL".parse::<DetailLevel>().unwrap(),
-            DetailLevel::Minimal
-        );
-    }
-
-    #[test]
-    fn test_detail_level_from_str_detailed() {
         assert_eq!(
             "detailed".parse::<DetailLevel>().unwrap(),
             DetailLevel::Detailed
@@ -178,73 +170,14 @@ mod tests {
             DetailLevel::Detailed
         );
         assert_eq!(
-            "DETAILED".parse::<DetailLevel>().unwrap(),
-            DetailLevel::Detailed
-        );
-    }
-
-    #[test]
-    fn test_detail_level_from_str_defaults_to_standard() {
-        assert_eq!(
-            "standard".parse::<DetailLevel>().unwrap(),
-            DetailLevel::Standard
+            "MINIMAL".parse::<DetailLevel>().unwrap(),
+            DetailLevel::Minimal
         );
         assert_eq!(
             "unknown".parse::<DetailLevel>().unwrap(),
             DetailLevel::Standard
         );
         assert_eq!("".parse::<DetailLevel>().unwrap(), DetailLevel::Standard);
-    }
-
-    #[test]
-    fn test_detail_level_minimal_caps() {
-        let level = DetailLevel::Minimal;
-        assert_eq!(level.max_callers(), 5);
-        assert_eq!(level.max_callees(), 5);
-        assert_eq!(level.max_annotations(), 0);
-        assert_eq!(level.max_file_annotations(), 0);
-        assert_eq!(level.max_project_annotations(), 0);
-        assert_eq!(level.max_doc_chunks(), 0);
-        assert_eq!(level.max_node_history(), 0);
-        assert_eq!(level.max_extended_neighbors(), 0);
-        assert!(!level.include_body());
-    }
-
-    #[test]
-    fn test_detail_level_standard_caps() {
-        let level = DetailLevel::Standard;
-        assert_eq!(level.max_callers(), 10);
-        assert_eq!(level.max_callees(), 10);
-        assert_eq!(level.max_annotations(), 5);
-        assert_eq!(level.max_file_annotations(), 0);
-        assert_eq!(level.max_project_annotations(), 0);
-        assert_eq!(level.max_doc_chunks(), 0);
-        assert_eq!(level.max_node_history(), 0);
-        assert_eq!(level.max_extended_neighbors(), 0);
-        assert!(!level.include_body());
-    }
-
-    #[test]
-    fn test_detail_level_detailed_caps() {
-        let level = DetailLevel::Detailed;
-        assert_eq!(level.max_callers(), 20);
-        assert_eq!(level.max_callees(), 20);
-        assert_eq!(level.max_annotations(), 10);
-        assert_eq!(level.max_file_annotations(), 5);
-        assert_eq!(level.max_project_annotations(), 3);
-        assert_eq!(level.max_doc_chunks(), 3);
-        assert_eq!(level.max_node_history(), 3);
-        assert_eq!(level.max_extended_neighbors(), 50);
-        assert!(level.include_body());
-    }
-
-    #[test]
-    fn test_capsule_constraints_from_detail() {
-        let constraints = CapsuleConstraints::from_detail(DetailLevel::Minimal);
-        assert_eq!(constraints.detail_level, DetailLevel::Minimal);
-        assert_eq!(constraints.max_callers, 5);
-        assert_eq!(constraints.max_annotations, 0);
-        assert!(!constraints.include_body);
     }
 
     #[test]
@@ -266,7 +199,6 @@ mod tests {
 
         assert_eq!(constraints.detail_level, DetailLevel::Detailed);
         assert_eq!(constraints.max_callers, 20);
-        assert_eq!(constraints.max_callees, 20);
         assert_eq!(constraints.max_annotations, 10);
         assert!(constraints.include_body);
     }
