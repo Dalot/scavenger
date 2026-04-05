@@ -295,33 +295,33 @@ fn gather_annotations(
 
     // Project-level annotations (anchor_type IS NULL), capped at constraints.max_project_annotations
     let project_cap = constraints.max_project_annotations as usize;
-    if project_cap > 0 {
-        if let Ok(mut annotations) = crate::db::queries::get_project_level_annotations(conn) {
-            annotations.sort_by(|a, b| {
-                b.quality
-                    .partial_cmp(&a.quality)
-                    .unwrap_or(std::cmp::Ordering::Equal)
-            });
-            annotations.truncate(project_cap);
-            for ann in annotations {
-                let prefix = annotation_prefix(&ann.kind, ann.stale);
-                let content = format!("{prefix} {}", ann.text);
-                let mut item = new_candidate(
-                    content.clone(),
-                    estimate_tokens(&content),
-                    CandidateSource::Annotation,
-                    None,
-                    None,
-                    ann.stale,
-                    false,
-                );
-                item.anchor_type = None;
-                item.timestamp = Some(ann.updated_at);
-                item.annotation_kind = Some(ann.kind.clone());
-                item.quality = Some(ann.quality);
-                item.annotation_id = Some(ann.id.clone());
-                candidates.push(item);
-            }
+    if project_cap > 0
+        && let Ok(mut annotations) = crate::db::queries::get_project_level_annotations(conn)
+    {
+        annotations.sort_by(|a, b| {
+            b.quality
+                .partial_cmp(&a.quality)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        annotations.truncate(project_cap);
+        for ann in annotations {
+            let prefix = annotation_prefix(&ann.kind, ann.stale);
+            let content = format!("{prefix} {}", ann.text);
+            let mut item = new_candidate(
+                content.clone(),
+                estimate_tokens(&content),
+                CandidateSource::Annotation,
+                None,
+                None,
+                ann.stale,
+                false,
+            );
+            item.anchor_type = None;
+            item.timestamp = Some(ann.updated_at);
+            item.annotation_kind = Some(ann.kind.clone());
+            item.quality = Some(ann.quality);
+            item.annotation_id = Some(ann.id.clone());
+            candidates.push(item);
         }
     }
 }

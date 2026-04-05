@@ -106,7 +106,7 @@ async fn handle_capsule(state: &Arc<DaemonState>, request: &Value) -> Value {
 
     let constraints = capsule::budget::CapsuleConstraints::from_detail(
         detail_level
-            .map(capsule::budget::DetailLevel::from_str)
+            .and_then(|s| s.parse().ok())
             .unwrap_or_default(),
     );
     let constraints = constraints.with_overrides(

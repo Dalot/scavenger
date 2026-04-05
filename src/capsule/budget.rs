@@ -1,4 +1,5 @@
 use serde::Deserialize;
+use std::str::FromStr;
 
 /// Controls how much context is included in a capsule response.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
@@ -9,15 +10,19 @@ pub enum DetailLevel {
     Detailed,
 }
 
-impl DetailLevel {
-    pub fn from_str(s: &str) -> Self {
+impl FromStr for DetailLevel {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.to_lowercase().as_str() {
-            "minimal" | "min" => Self::Minimal,
-            "detailed" | "detail" | "full" => Self::Detailed,
-            _ => Self::Standard,
+            "minimal" | "min" => Ok(Self::Minimal),
+            "detailed" | "detail" | "full" => Ok(Self::Detailed),
+            _ => Ok(Self::Standard),
         }
     }
+}
 
+impl DetailLevel {
     pub fn max_callers(&self) -> u32 {
         match self {
             Self::Minimal => 5,
@@ -130,7 +135,7 @@ impl CapsuleConstraints {
         include_body: Option<bool>,
     ) -> Self {
         let level = detail_level
-            .map(DetailLevel::from_str)
+            .and_then(|s| s.parse().ok())
             .unwrap_or(self.detail_level);
 
         self.detail_level = level;
@@ -149,24 +154,48 @@ mod tests {
 
     #[test]
     fn test_detail_level_from_str_minimal() {
-        assert_eq!(DetailLevel::from_str("minimal"), DetailLevel::Minimal);
-        assert_eq!(DetailLevel::from_str("min"), DetailLevel::Minimal);
-        assert_eq!(DetailLevel::from_str("MINIMAL"), DetailLevel::Minimal);
+        assert_eq!(
+            "minimal".parse::<DetailLevel>().unwrap(),
+            DetailLevel::Minimal
+        );
+        assert_eq!("min".parse::<DetailLevel>().unwrap(), DetailLevel::Minimal);
+        assert_eq!(
+            "MINIMAL".parse::<DetailLevel>().unwrap(),
+            DetailLevel::Minimal
+        );
     }
 
     #[test]
     fn test_detail_level_from_str_detailed() {
-        assert_eq!(DetailLevel::from_str("detailed"), DetailLevel::Detailed);
-        assert_eq!(DetailLevel::from_str("detail"), DetailLevel::Detailed);
-        assert_eq!(DetailLevel::from_str("full"), DetailLevel::Detailed);
-        assert_eq!(DetailLevel::from_str("DETAILED"), DetailLevel::Detailed);
+        assert_eq!(
+            "detailed".parse::<DetailLevel>().unwrap(),
+            DetailLevel::Detailed
+        );
+        assert_eq!(
+            "detail".parse::<DetailLevel>().unwrap(),
+            DetailLevel::Detailed
+        );
+        assert_eq!(
+            "full".parse::<DetailLevel>().unwrap(),
+            DetailLevel::Detailed
+        );
+        assert_eq!(
+            "DETAILED".parse::<DetailLevel>().unwrap(),
+            DetailLevel::Detailed
+        );
     }
 
     #[test]
     fn test_detail_level_from_str_defaults_to_standard() {
-        assert_eq!(DetailLevel::from_str("standard"), DetailLevel::Standard);
-        assert_eq!(DetailLevel::from_str("unknown"), DetailLevel::Standard);
-        assert_eq!(DetailLevel::from_str(""), DetailLevel::Standard);
+        assert_eq!(
+            "standard".parse::<DetailLevel>().unwrap(),
+            DetailLevel::Standard
+        );
+        assert_eq!(
+            "unknown".parse::<DetailLevel>().unwrap(),
+            DetailLevel::Standard
+        );
+        assert_eq!("".parse::<DetailLevel>().unwrap(), DetailLevel::Standard);
     }
 
     #[test]
