@@ -1,3 +1,4 @@
+use std::convert::Infallible;
 use std::str::FromStr;
 
 /// Controls how much context is included in a capsule response.
@@ -10,7 +11,7 @@ pub enum DetailLevel {
 }
 
 impl FromStr for DetailLevel {
-    type Err = ();
+    type Err = Infallible;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.to_lowercase().as_str() {
@@ -123,27 +124,6 @@ impl CapsuleConstraints {
             include_body: level.include_body(),
         }
     }
-
-    pub fn with_overrides(
-        mut self,
-        detail_level: Option<&str>,
-        max_callers: Option<u32>,
-        max_callees: Option<u32>,
-        max_annotations: Option<u32>,
-        include_body: Option<bool>,
-    ) -> Self {
-        let level = detail_level
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(self.detail_level);
-
-        self.detail_level = level;
-        self.max_callers = max_callers.unwrap_or(level.max_callers());
-        self.max_callees = max_callees.unwrap_or(level.max_callees());
-        self.max_annotations = max_annotations.unwrap_or(level.max_annotations());
-        self.include_body = include_body.unwrap_or(level.include_body());
-
-        self
-    }
 }
 
 #[cfg(test)]
@@ -181,25 +161,39 @@ mod tests {
     }
 
     #[test]
-    fn test_capsule_constraints_with_overrides() {
-        let base = CapsuleConstraints::from_detail(DetailLevel::Standard);
-        let constraints = base.with_overrides(Some("minimal"), Some(2), None, Some(10), Some(true));
-
-        assert_eq!(constraints.detail_level, DetailLevel::Minimal);
-        assert_eq!(constraints.max_callers, 2);
-        assert_eq!(constraints.max_callees, 5);
-        assert_eq!(constraints.max_annotations, 10);
-        assert!(constraints.include_body);
+    fn test_capsule_constraints_from_detail() {
+        let c = CapsuleConstraints::from_detail(DetailLevel::Standard);
+        assert_eq!(c.max_callers, 10);
+        assert_eq!(c.max_callees, 10);
+        assert_eq!(c.max_annotations, 5);
+        assert_eq!(c.max_file_annotations, 0);
+        assert_eq!(c.max_project_annotations, 0);
+        assert_eq!(c.max_doc_chunks, 0);
+        assert_eq!(c.max_node_history, 0);
+        assert_eq!(c.max_extended_neighbors, 0);
+        assert!(!c.include_body);
     }
 
     #[test]
-    fn test_capsule_constraints_no_overrides_uses_level_defaults() {
-        let base = CapsuleConstraints::from_detail(DetailLevel::Detailed);
-        let constraints = base.with_overrides(None, None, None, None, None);
+    fn test_capsule_constraints_detailed() {
+        let c = CapsuleConstraints::from_detail(DetailLevel::Detailed);
+        assert_eq!(c.max_callers, 20);
+        assert_eq!(c.max_annotations, 10);
+        assert_eq!(c.max_file_annotations, 3);
+        assert_eq!(c.max_project_annotations, 3);
+        assert_eq!(c.max_doc_chunks, 3);
+        assert_eq!(c.max_node_history, 3);
+        assert_eq!(c.max_extended_neighbors, 50);
+        assert!(c.include_body);
+    }
 
-        assert_eq!(constraints.detail_level, DetailLevel::Detailed);
-        assert_eq!(constraints.max_callers, 20);
-        assert_eq!(constraints.max_annotations, 10);
-        assert!(constraints.include_body);
+    #[test]
+    fn test_capsule_constraints_minimal() {
+        let c = CapsuleConstraints::from_detail(DetailLevel::Minimal);
+        assert_eq!(c.max_callers, 5);
+        assert_eq!(c.max_callees, 5);
+        assert_eq!(c.max_annotations, 0);
+        assert_eq!(c.max_extended_neighbors, 0);
+        assert!(!c.include_body);
     }
 }

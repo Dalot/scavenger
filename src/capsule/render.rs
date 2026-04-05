@@ -81,10 +81,9 @@ pub struct TargetBody {
 /// RENDER stage: emit the final capsule text following section ordering per FR-018.
 /// Order: [!] → [TARGET] → [CALLERS] → [CALLEES] → [CONTEXT] → [DOCUMENTATION] → [BODY]
 /// Empty sections are omitted. Scores are NOT in output.
-/// If `target_body` is provided and `include_body` is true and remaining budget > 200 tokens, the full body is appended.
+/// If `target_body` is provided and `include_body` is true, the full body is appended.
 pub fn render(
     candidates: &[CandidateItem],
-    remaining_budget: u32,
     target_body: Option<&TargetBody>,
     include_body: bool,
 ) -> String {
@@ -115,14 +114,10 @@ pub fn render(
     }
 
     if include_body
-        && remaining_budget > 200
         && let Some(tb) = target_body
         && let Ok(body_text) = read_body_from_file(&tb.file_path, tb.line_start, tb.line_end)
     {
-        let body_tokens = (body_text.len() / 4) as u32;
-        if body_tokens <= remaining_budget {
-            sections.push(format!("[BODY] {}\n{}", tb.name, body_text));
-        }
+        sections.push(format!("[BODY] {}\n{}", tb.name, body_text));
     }
 
     sections.join("\n\n")
@@ -284,7 +279,7 @@ mod tests {
                 OutputGroup::Callers,
             ),
         ];
-        let output = render(&items, 1000, None, true);
+        let output = render(&items, None, true);
         let signal_pos = output.find("[!]").unwrap();
         let target_pos = output.find("[TARGET]").unwrap();
         let callers_pos = output.find("[CALLERS]").unwrap();
@@ -301,7 +296,7 @@ mod tests {
             true,
             OutputGroup::Target,
         )];
-        let output = render(&items, 1000, None, true);
+        let output = render(&items, None, true);
         assert!(output.contains("[TARGET]"));
         assert!(!output.contains("[CALLERS]"));
     }
@@ -327,7 +322,7 @@ mod tests {
             name: "hello".to_string(),
         };
 
-        let output = render(&items, 500, Some(&tb), true);
+        let output = render(&items, Some(&tb), true);
         assert!(
             output.contains("[BODY] hello"),
             "should include [BODY] section: {output}"
@@ -339,7 +334,7 @@ mod tests {
     }
 
     #[test]
-    fn test_render_body_not_included_below_threshold() {
+    fn test_render_body_not_included_when_file_missing() {
         let items = vec![full_item(
             CandidateSource::Target,
             "fn hello()",
@@ -355,10 +350,10 @@ mod tests {
             name: "hello".to_string(),
         };
 
-        let output = render(&items, 100, Some(&tb), true);
+        let output = render(&items, Some(&tb), true);
         assert!(
             !output.contains("[BODY]"),
-            "should not include [BODY] when budget <= 200"
+            "should not include [BODY] when file does not exist"
         );
     }
 
@@ -383,7 +378,7 @@ mod tests {
             name: "hello".to_string(),
         };
 
-        let output = render(&items, 500, Some(&tb), false);
+        let output = render(&items, Some(&tb), false);
         assert!(
             !output.contains("[BODY]"),
             "should not include [BODY] when include_body=false: {output}"

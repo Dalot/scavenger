@@ -50,9 +50,24 @@ enum Commands {
         /// Query string for intent detection
         #[arg(long)]
         query: Option<String>,
-        /// Budget override
+        /// Token budget override
         #[arg(long)]
         budget: Option<u32>,
+        /// Context depth: "minimal", "standard" (default), "detailed"
+        #[arg(long)]
+        detail_level: Option<String>,
+        /// Override max caller count
+        #[arg(long)]
+        max_callers: Option<u32>,
+        /// Override max callee count
+        #[arg(long)]
+        max_callees: Option<u32>,
+        /// Override max annotation count
+        #[arg(long)]
+        max_annotations: Option<u32>,
+        /// Include full function body if budget allows
+        #[arg(long)]
+        include_body: Option<bool>,
     },
 
     /// Query annotations
@@ -304,7 +319,22 @@ fn main() {
             symbol,
             query,
             budget,
-        } => cmd_capsule(file, symbol, query, budget),
+            detail_level,
+            max_callers,
+            max_callees,
+            max_annotations,
+            include_body,
+        } => cmd_capsule(
+            file,
+            symbol,
+            query,
+            budget,
+            detail_level,
+            max_callers,
+            max_callees,
+            max_annotations,
+            include_body,
+        ),
         Commands::Memory { query, limit } => cmd_memory(query, limit),
         Commands::Graph { command } => cmd_graph(command),
         Commands::Annotate { symbol, text, tags } => cmd_annotate(symbol, text, tags),
@@ -553,11 +583,17 @@ fn cmd_index(path: Option<PathBuf>) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn cmd_capsule(
     file: PathBuf,
     symbol: Option<String>,
     query_str: Option<String>,
     budget: Option<u32>,
+    detail_level: Option<String>,
+    max_callers: Option<u32>,
+    max_callees: Option<u32>,
+    max_annotations: Option<u32>,
+    include_body: Option<bool>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let project_root = std::env::current_dir()?;
     let scavenger_dir = db::scavenger_dir(&project_root);
@@ -570,8 +606,23 @@ fn cmd_capsule(
     g.compute_pagerank(0.85, 30);
 
     let file_str = file.to_string_lossy().to_string();
-    let constraints =
-        capsule::budget::CapsuleConstraints::from_detail(capsule::budget::DetailLevel::Standard);
+    let level = detail_level
+        .as_deref()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or_default();
+    let mut constraints = capsule::budget::CapsuleConstraints::from_detail(level);
+    if let Some(v) = max_callers {
+        constraints.max_callers = v;
+    }
+    if let Some(v) = max_callees {
+        constraints.max_callees = v;
+    }
+    if let Some(v) = max_annotations {
+        constraints.max_annotations = v;
+    }
+    if let Some(v) = include_body {
+        constraints.include_body = v;
+    }
     let qr = query::run_query(
         &conn,
         &g,

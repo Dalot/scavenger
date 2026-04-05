@@ -104,18 +104,23 @@ async fn handle_capsule(state: &Arc<DaemonState>, request: &Value) -> Value {
         .map(|v| v as u32);
     let include_body = request.get("include_body").and_then(|v| v.as_bool());
 
-    let constraints = capsule::budget::CapsuleConstraints::from_detail(
+    let mut constraints = capsule::budget::CapsuleConstraints::from_detail(
         detail_level
             .and_then(|s| s.parse().ok())
             .unwrap_or_default(),
     );
-    let constraints = constraints.with_overrides(
-        detail_level,
-        max_callers,
-        max_callees,
-        max_annotations,
-        include_body,
-    );
+    if let Some(v) = max_callers {
+        constraints.max_callers = v;
+    }
+    if let Some(v) = max_callees {
+        constraints.max_callees = v;
+    }
+    if let Some(v) = max_annotations {
+        constraints.max_annotations = v;
+    }
+    if let Some(v) = include_body {
+        constraints.include_body = v;
+    }
 
     let start = Instant::now();
 
@@ -179,6 +184,7 @@ async fn handle_capsule(state: &Arc<DaemonState>, request: &Value) -> Value {
         file = %file,
         symbol = symbol.unwrap_or(""),
         intent = ?query_result.intent.primary,
+        detail_level = ?constraints.detail_level,
         tokens = result.token_count,
         items = result.items_included,
         empty = result.text.is_empty(),

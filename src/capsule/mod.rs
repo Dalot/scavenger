@@ -152,8 +152,6 @@ pub fn assemble(
 
     // Stage 6: RENDER
     let t5 = Instant::now();
-    let remaining =
-        effective_budget.saturating_sub(candidates.iter().map(|c| c.token_count).sum::<u32>());
 
     let target_body = query_result.target.as_ref().and_then(|tid| {
         let node = graph.get_weight(tid)?;
@@ -165,12 +163,7 @@ pub fn assemble(
         })
     });
 
-    let text = render::render(
-        &candidates,
-        remaining,
-        target_body.as_ref(),
-        constraints.include_body,
-    );
+    let text = render::render(&candidates, target_body.as_ref(), constraints.include_body);
     let token_count = (text.len() / 4) as u32;
     let render_us = t5.elapsed().as_micros() as u64;
 

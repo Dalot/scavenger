@@ -106,3 +106,96 @@ fn test_capsule_with_no_target() {
     // Should still work gracefully
     assert!(result.items_included == 0 || result.text.is_empty() || !result.text.is_empty());
 }
+
+#[test]
+fn test_capsule_minimal_has_no_annotations_or_docs() {
+    let (conn, g) = setup();
+    let config = Config::default();
+
+    let qr = QueryResult {
+        target: Some(NodeId("n1".to_string())),
+        intent: IntentResult::single(Intent::Understand),
+        neighbor_ids: vec![],
+        search_results: vec![],
+    };
+
+    let constraints = CapsuleConstraints::from_detail(DetailLevel::Minimal);
+    let result = scavenger::capsule::assemble(&conn, &g, &config, &qr, None, &constraints);
+
+    assert!(
+        !result.text.is_empty(),
+        "minimal should still produce output"
+    );
+    assert!(
+        result.text.contains("[TARGET]"),
+        "should have target section"
+    );
+    assert!(
+        !result.text.contains("[DOCUMENTATION]"),
+        "minimal should not have documentation"
+    );
+    assert_eq!(
+        constraints.max_annotations, 0,
+        "minimal should cap annotations at 0"
+    );
+    assert!(!constraints.include_body, "minimal should not include body");
+}
+
+#[test]
+fn test_capsule_detailed_includes_body_when_requested() {
+    let (conn, g) = setup();
+    let config = Config::default();
+
+    let qr = QueryResult {
+        target: Some(NodeId("n1".to_string())),
+        intent: IntentResult::single(Intent::Understand),
+        neighbor_ids: vec![],
+        search_results: vec![],
+    };
+
+    let mut constraints = CapsuleConstraints::from_detail(DetailLevel::Detailed);
+    assert!(
+        constraints.include_body,
+        "detailed should default to include_body=true"
+    );
+
+    let result = scavenger::capsule::assemble(&conn, &g, &config, &qr, None, &constraints);
+
+    assert!(!result.text.is_empty(), "detailed should produce output");
+    assert_eq!(
+        constraints.max_callers, 20,
+        "detailed should allow 20 callers"
+    );
+    assert_eq!(
+        constraints.max_annotations, 10,
+        "detailed should allow 10 annotations"
+    );
+    assert_eq!(
+        constraints.max_extended_neighbors, 50,
+        "detailed should allow extended neighbors"
+    );
+}
+
+#[test]
+fn test_capsule_override_max_callers() {
+    let (conn, g) = setup();
+    let config = Config::default();
+
+    let qr = QueryResult {
+        target: Some(NodeId("n1".to_string())),
+        intent: IntentResult::single(Intent::Understand),
+        neighbor_ids: vec![],
+        search_results: vec![],
+    };
+
+    let mut constraints = CapsuleConstraints::from_detail(DetailLevel::Standard);
+    constraints.max_callers = 2;
+
+    let result = scavenger::capsule::assemble(&conn, &g, &config, &qr, None, &constraints);
+
+    assert!(
+        !result.text.is_empty(),
+        "should produce output with caller override"
+    );
+    assert_eq!(constraints.max_callers, 2, "override should take effect");
+}
