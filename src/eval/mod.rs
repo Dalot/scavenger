@@ -8,8 +8,22 @@ pub mod thresholds;
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use thiserror::Error;
+
+#[derive(Error, Debug)]
+pub enum EvalError {
+    #[error("corpus path not found: {0}")]
+    CorpusNotFound(std::path::PathBuf),
+    #[error("cannot read directory {0}: {1}")]
+    ReadError(std::path::PathBuf, std::io::Error),
+    #[error("invalid TOML in {0}: {1}")]
+    ParseError(std::path::PathBuf, toml::de::Error),
+}
+
+pub type EvalResult<T> = Result<T, EvalError>;
 
 #[derive(Debug, Clone, Serialize)]
+#[must_use = "eval case results should not be silently discarded"]
 pub struct CaseResult {
     pub case_name: String,
     pub metrics: HashMap<String, f64>,
@@ -18,6 +32,7 @@ pub struct CaseResult {
 }
 
 #[derive(Debug, Clone, Serialize)]
+#[must_use = "eval summaries should not be silently discarded"]
 pub struct SuiteSummary {
     pub suite_name: String,
     pub corpus: String,
@@ -36,6 +51,7 @@ pub enum EvalTier {
 }
 
 #[derive(Debug, Clone, Serialize)]
+#[must_use = "eval run results should not be silently discarded"]
 pub struct EvalRun {
     pub run_id: String,
     pub scavenger_version: String,
