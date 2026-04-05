@@ -1,7 +1,7 @@
 use super::{DbError, DbResult};
 use rusqlite::Connection;
 
-pub const KNOWN_MAX_VERSION: u32 = 3;
+pub const KNOWN_MAX_VERSION: u32 = 4;
 
 /// Ensure the per-branch index database has all required tables, FTS5 virtual
 /// tables, triggers, and indexes. Uses PRAGMA user_version for migration tracking.
@@ -30,6 +30,12 @@ pub fn ensure_branch_schema(conn: &Connection) -> DbResult<()> {
     if current == 2 {
         migrate_v2_to_v3(conn)?;
         conn.pragma_update(None, "user_version", 3)?;
+        current = 3;
+    }
+
+    if current == 3 {
+        migrate_v3_to_v4(conn)?;
+        conn.pragma_update(None, "user_version", 4)?;
     }
 
     Ok(())
@@ -73,6 +79,33 @@ fn migrate_v1_to_v2(conn: &Connection) -> DbResult<()> {
 fn migrate_v2_to_v3(conn: &Connection) -> DbResult<()> {
     // content_hash already present in fresh v1 schemas; only add for upgraded DBs
     let _ = conn.execute_batch("ALTER TABLE files ADD COLUMN content_hash TEXT;");
+    Ok(())
+}
+
+fn migrate_v3_to_v4(conn: &Connection) -> DbResult<()> {
+    // Extend behavioral_signals CHECK constraint to include new signal kinds.
+    // SQLite doesn't support ALTER TABLE ADD CHECK, so we recreate the table.
+    conn.execute_batch(
+        "CREATE TABLE behavioral_signals_new (
+            id         INTEGER PRIMARY KEY,
+            kind       TEXT NOT NULL CHECK(kind IN (
+                           'THRASHING', 'EMPTY_CAPSULE', 'FAILED_SEARCH',
+                           'CHURN', 'HOTSPOT', 'LARGE_BLAST_RADIUS'
+                       )),
+            node_id    TEXT,
+            file_path  TEXT,
+            session_id TEXT NOT NULL,
+            timestamp  INTEGER NOT NULL,
+            detail     TEXT
+        );
+        INSERT INTO behavioral_signals_new SELECT * FROM behavioral_signals;
+        DROP TABLE behavioral_signals;
+        ALTER TABLE behavioral_signals_new RENAME TO behavioral_signals;
+        CREATE INDEX IF NOT EXISTS idx_signals_node
+            ON behavioral_signals(node_id, timestamp DESC);
+        CREATE INDEX IF NOT EXISTS idx_signals_session
+            ON behavioral_signals(session_id);",
+    )?;
     Ok(())
 }
 
@@ -233,9 +266,8 @@ END;
 CREATE TABLE IF NOT EXISTS behavioral_signals (
     id         INTEGER PRIMARY KEY,
     kind       TEXT NOT NULL CHECK(kind IN (
-                   'THRASHING', 'DEAD_END', 'CYCLE_INTRODUCED',
-                   'LARGE_BLAST_RADIUS', 'UNTESTED', 'INDEX_BLIND_SPOT',
-                   'FAILED_SEARCH'
+                   'THRASHING', 'EMPTY_CAPSULE', 'FAILED_SEARCH',
+                   'CHURN', 'HOTSPOT', 'LARGE_BLAST_RADIUS'
                )),
     node_id    TEXT,
     file_path  TEXT,
@@ -420,7 +452,7 @@ mod tests {
         let ver: u32 = conn
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .unwrap();
-        assert_eq!(ver, 3);
+        assert_eq!(ver, 4);
     }
 
     #[test]
@@ -546,5 +578,43 @@ mod tests {
             )
             .unwrap();
         assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn test_v3_to_v4_migration() {
+        let conn = Connection::open_in_memory().unwrap();
+        ensure_branch_schema(&conn).unwrap();
+
+        // Insert a signal with the new schema's valid kinds
+        conn.execute(
+            "INSERT INTO behavioral_signals (kind, node_id, file_path, session_id, timestamp, detail)
+             VALUES ('THRASHING', 'n1', '/src/lib.rs', 's1', 1000, 'test')",
+            [],
+        ).unwrap();
+
+        // Verify the new CHECK constraint accepts all 7 kinds
+        for kind in &[
+            "THRASHING",
+            "EMPTY_CAPSULE",
+            "FAILED_SEARCH",
+            "CHURN",
+            "HOTSPOT",
+            "LARGE_BLAST_RADIUS",
+        ] {
+            conn.execute(
+                &format!("INSERT INTO behavioral_signals (kind, session_id, timestamp) VALUES ('{}', 's2', 1000)", kind),
+                [],
+            ).unwrap_or_else(|e| panic!("Failed to insert {}: {}", kind, e));
+        }
+
+        // Verify old kinds are rejected
+        let result = conn.execute(
+            "INSERT INTO behavioral_signals (kind, session_id, timestamp) VALUES ('DEAD_END', 's3', 1000)",
+            [],
+        );
+        assert!(
+            result.is_err(),
+            "DEAD_END should be rejected after migration"
+        );
     }
 }

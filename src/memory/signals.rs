@@ -92,27 +92,45 @@ pub fn active_signal_count(conn: &Connection) -> Result<u64, Box<dyn std::error:
     Ok(count as u64)
 }
 
+/// Utility classification for signals.
+///
+/// - Improvement: signals that drive Scavenger's own improvement loop
+///   (capsule assembly, annotation quality, retrieval).
+/// - Insights: signals that give the user actionable knowledge about their codebase.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum SignalUtility {
+    Improvement,
+    Insights,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum SignalKind {
+    // Improvement signals
     Thrashing,
-    DeadEnd,
-    CycleIntroduced,
-    LargeBlastRadius,
-    Untested,
-    IndexBlindSpot,
+    EmptyCapsule,
     FailedSearch,
+    // Insights signals
+    Churn,
+    Hotspot,
+    LargeBlastRadius,
 }
 
 impl SignalKind {
+    pub fn utility(&self) -> SignalUtility {
+        match self {
+            Self::Thrashing | Self::EmptyCapsule | Self::FailedSearch => SignalUtility::Improvement,
+            Self::Churn | Self::Hotspot | Self::LargeBlastRadius => SignalUtility::Insights,
+        }
+    }
+
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::Thrashing => "THRASHING",
-            Self::DeadEnd => "DEAD_END",
-            Self::CycleIntroduced => "CYCLE_INTRODUCED",
-            Self::LargeBlastRadius => "LARGE_BLAST_RADIUS",
-            Self::Untested => "UNTESTED",
-            Self::IndexBlindSpot => "INDEX_BLIND_SPOT",
+            Self::EmptyCapsule => "EMPTY_CAPSULE",
             Self::FailedSearch => "FAILED_SEARCH",
+            Self::Churn => "CHURN",
+            Self::Hotspot => "HOTSPOT",
+            Self::LargeBlastRadius => "LARGE_BLAST_RADIUS",
         }
     }
 
@@ -120,12 +138,11 @@ impl SignalKind {
     pub fn from_str(s: &str) -> Option<Self> {
         match s {
             "THRASHING" => Some(Self::Thrashing),
-            "DEAD_END" => Some(Self::DeadEnd),
-            "CYCLE_INTRODUCED" => Some(Self::CycleIntroduced),
-            "LARGE_BLAST_RADIUS" => Some(Self::LargeBlastRadius),
-            "UNTESTED" => Some(Self::Untested),
-            "INDEX_BLIND_SPOT" => Some(Self::IndexBlindSpot),
+            "EMPTY_CAPSULE" => Some(Self::EmptyCapsule),
             "FAILED_SEARCH" => Some(Self::FailedSearch),
+            "CHURN" => Some(Self::Churn),
+            "HOTSPOT" => Some(Self::Hotspot),
+            "LARGE_BLAST_RADIUS" => Some(Self::LargeBlastRadius),
             _ => None,
         }
     }
@@ -177,8 +194,24 @@ mod tests {
     #[test]
     fn test_query_by_session() {
         let conn = setup_db();
-        insert_signal(&conn, SignalKind::DeadEnd, Some("n1"), None, "sess1", None).unwrap();
-        insert_signal(&conn, SignalKind::Untested, Some("n2"), None, "sess1", None).unwrap();
+        insert_signal(
+            &conn,
+            SignalKind::Thrashing,
+            Some("n1"),
+            None,
+            "sess1",
+            None,
+        )
+        .unwrap();
+        insert_signal(
+            &conn,
+            SignalKind::Churn,
+            None,
+            Some("/src/lib.rs"),
+            "sess1",
+            None,
+        )
+        .unwrap();
         let signals = signals_for_session(&conn, "sess1", 10).unwrap();
         assert_eq!(signals.len(), 2);
     }
@@ -197,5 +230,43 @@ mod tests {
         .unwrap();
         let count = active_signal_count(&conn).unwrap();
         assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn test_signal_utility_improvement() {
+        assert_eq!(SignalKind::Thrashing.utility(), SignalUtility::Improvement);
+        assert_eq!(
+            SignalKind::EmptyCapsule.utility(),
+            SignalUtility::Improvement
+        );
+        assert_eq!(
+            SignalKind::FailedSearch.utility(),
+            SignalUtility::Improvement
+        );
+    }
+
+    #[test]
+    fn test_signal_utility_insights() {
+        assert_eq!(SignalKind::Churn.utility(), SignalUtility::Insights);
+        assert_eq!(SignalKind::Hotspot.utility(), SignalUtility::Insights);
+        assert_eq!(
+            SignalKind::LargeBlastRadius.utility(),
+            SignalUtility::Insights
+        );
+    }
+
+    #[test]
+    fn test_signal_from_str_roundtrip() {
+        for kind in [
+            SignalKind::Thrashing,
+            SignalKind::EmptyCapsule,
+            SignalKind::FailedSearch,
+            SignalKind::Churn,
+            SignalKind::Hotspot,
+            SignalKind::LargeBlastRadius,
+        ] {
+            assert_eq!(SignalKind::from_str(kind.as_str()), Some(kind));
+        }
+        assert_eq!(SignalKind::from_str("UNKNOWN"), None);
     }
 }

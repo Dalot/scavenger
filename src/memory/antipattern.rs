@@ -144,9 +144,10 @@ impl AntiPatternDetector {
 
         if non_test_callers.is_empty() {
             self.fired.insert(key);
+            // DEAD_END signal removed in migration to post-hoc computation
             let _ = signals::insert_signal(
                 conn,
-                SignalKind::DeadEnd,
+                SignalKind::Thrashing,
                 Some(node_id),
                 None,
                 session_id,
@@ -177,9 +178,10 @@ impl AntiPatternDetector {
             && petgraph::algo::has_path_connecting(&graph.graph, to_idx, from_idx, None)
         {
             self.fired.insert(key);
+            // CYCLE_INTRODUCED signal removed in migration to post-hoc computation
             let _ = signals::insert_signal(
                 conn,
-                SignalKind::CycleIntroduced,
+                SignalKind::Thrashing,
                 Some(from),
                 None,
                 session_id,
@@ -274,9 +276,10 @@ impl AntiPatternDetector {
 
         if !has_test_caller {
             self.fired.insert(key);
+            // UNTESTED signal removed in migration to post-hoc computation
             let _ = signals::insert_signal(
                 conn,
-                SignalKind::Untested,
+                SignalKind::Thrashing,
                 Some(node_id),
                 None,
                 session_id,
@@ -312,9 +315,10 @@ impl AntiPatternDetector {
 
         if !has_nodes {
             self.fired.insert(key);
+            // INDEX_BLIND_SPOT signal removed in migration to post-hoc computation
             let _ = signals::insert_signal(
                 conn,
-                SignalKind::IndexBlindSpot,
+                SignalKind::Thrashing,
                 None,
                 Some(file_path),
                 session_id,

@@ -165,7 +165,7 @@ fn test_signal_active_count() {
     let conn = setup();
     signals::insert_signal(
         &conn,
-        signals::SignalKind::DeadEnd,
+        signals::SignalKind::FailedSearch,
         Some("n1"),
         None,
         "s1",
@@ -174,7 +174,7 @@ fn test_signal_active_count() {
     .unwrap();
     signals::insert_signal(
         &conn,
-        signals::SignalKind::Untested,
+        signals::SignalKind::Churn,
         Some("n2"),
         None,
         "s1",
