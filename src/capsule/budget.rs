@@ -1,8 +1,7 @@
-use serde::Deserialize;
 use std::str::FromStr;
 
 /// Controls how much context is included in a capsule response.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum DetailLevel {
     Minimal,
     #[default]
@@ -49,8 +48,7 @@ impl DetailLevel {
 
     pub fn max_file_annotations(&self) -> u32 {
         match self {
-            Self::Minimal => 0,
-            Self::Standard => 3,
+            Self::Minimal | Self::Standard => 0,
             Self::Detailed => 5,
         }
     }
@@ -218,7 +216,7 @@ mod tests {
         assert_eq!(level.max_callers(), 10);
         assert_eq!(level.max_callees(), 10);
         assert_eq!(level.max_annotations(), 5);
-        assert_eq!(level.max_file_annotations(), 3);
+        assert_eq!(level.max_file_annotations(), 0);
         assert_eq!(level.max_project_annotations(), 0);
         assert_eq!(level.max_doc_chunks(), 0);
         assert_eq!(level.max_node_history(), 0);
