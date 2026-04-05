@@ -4,8 +4,9 @@ use rusqlite::Connection;
 use std::path::PathBuf;
 
 use scavenger::capsule;
+use scavenger::capsule::budget::{CapsuleConstraints, DetailLevel};
 use scavenger::config::Config;
-use scavenger::db::{self, queries, schema};
+use scavenger::db::{self, schema};
 use scavenger::graph::{self, GraphState, index};
 use scavenger::query;
 
@@ -39,10 +40,19 @@ fn test_full_lifecycle() {
     // Generate capsule
     let config = Config::default();
     let file_str = src_dir.join("lib.rs").to_string_lossy().to_string();
-    let qr = query::run_query(&conn, &g, &config, &file_str, Some("hello"), None);
+    let constraints = CapsuleConstraints::from_detail(DetailLevel::Standard);
+    let qr = query::run_query(
+        &conn,
+        &g,
+        &config,
+        &file_str,
+        Some("hello"),
+        None,
+        &constraints,
+    );
     assert!(qr.target.is_some());
 
-    let capsule_result = capsule::assemble(&conn, &g, &config, &qr, None);
+    let capsule_result = capsule::assemble(&conn, &g, &config, &qr, None, &constraints);
     assert!(!capsule_result.text.is_empty());
     let _original_text = capsule_result.text.clone();
 
@@ -62,8 +72,16 @@ fn test_full_lifecycle() {
     assert_eq!(g.node_count(), 3);
 
     // Verify capsule now includes new content
-    let qr2 = query::run_query(&conn, &g, &config, &file_str, Some("hello"), None);
-    let capsule2 = capsule::assemble(&conn, &g, &config, &qr2, None);
+    let qr2 = query::run_query(
+        &conn,
+        &g,
+        &config,
+        &file_str,
+        Some("hello"),
+        None,
+        &constraints,
+    );
+    let capsule2 = capsule::assemble(&conn, &g, &config, &qr2, None, &constraints);
     // The capsule should now potentially include greet as a neighbor
     assert!(!capsule2.text.is_empty());
 }

@@ -18,6 +18,20 @@ pub struct GetCapsuleParams {
     pub symbol: Option<String>,
     /// Your intent or question — drives context selection strategy.
     pub query: Option<String>,
+    /// Control context depth. "minimal" = target + 1-hop only (~200-800 tokens).
+    /// "standard" (default) = full structural context + annotations (~800-3000 tokens).
+    /// "detailed" = everything including doc chunks and full body (~3000-8000 tokens).
+    pub detail_level: Option<String>,
+    /// Token budget override (default from config, typically 8000).
+    pub budget: Option<u32>,
+    /// Override max caller count (default from detail_level).
+    pub max_callers: Option<u32>,
+    /// Override max callee count (default from detail_level).
+    pub max_callees: Option<u32>,
+    /// Override max annotation count (default from detail_level).
+    pub max_annotations: Option<u32>,
+    /// Whether to include full function body if budget allows (default from detail_level).
+    pub include_body: Option<bool>,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -94,7 +108,7 @@ impl ScavengerBridge {
 impl ScavengerBridge {
     #[tool(
         name = "get_capsule",
-        description = "Primary navigation tool — replaces grep and file reads for structural questions. Pass a symbol name to get its callers, callees, and what would break if it changed (no grep needed). Pass a file path to get focused context within a token budget instead of reading the raw file. Returns signatures, dependency neighborhood, annotations, and behavioral signals from the AST graph."
+        description = "Primary navigation tool — replaces grep and file reads for structural questions. Pass a symbol name to get its callers, callees, and what would break if it changed (no grep needed). Pass a file path to get focused context within a token budget instead of reading the raw file. Returns signatures, dependency neighborhood, annotations, and behavioral signals from the AST graph.\n\nParameters:\n- detail_level: Control context depth. \"minimal\" = target + 1-hop only (~200-800 tokens). \"standard\" (default) = full structural context + annotations (~800-3000 tokens). \"detailed\" = everything including doc chunks and full body (~3000-8000 tokens).\n- budget: Token budget override (default from config, typically 8000).\n- max_callers: Override max caller count (default from detail_level).\n- max_callees: Override max callee count (default from detail_level).\n- max_annotations: Override max annotation count (default from detail_level).\n- include_body: Whether to include full function body if budget allows (default from detail_level)."
     )]
     async fn get_capsule(&self, params: Parameters<GetCapsuleParams>) -> Result<String, String> {
         let p = params.0;
@@ -107,6 +121,24 @@ impl ScavengerBridge {
         }
         if let Some(q) = &p.query {
             req["query"] = json!(q);
+        }
+        if let Some(dl) = &p.detail_level {
+            req["detail_level"] = json!(dl);
+        }
+        if let Some(b) = p.budget {
+            req["budget"] = json!(b);
+        }
+        if let Some(mc) = p.max_callers {
+            req["max_callers"] = json!(mc);
+        }
+        if let Some(mc) = p.max_callees {
+            req["max_callees"] = json!(mc);
+        }
+        if let Some(ma) = p.max_annotations {
+            req["max_annotations"] = json!(ma);
+        }
+        if let Some(ib) = p.include_body {
+            req["include_body"] = json!(ib);
         }
         let resp = self.uds_request(&req).await;
 

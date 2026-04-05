@@ -3,6 +3,7 @@ pub mod search;
 
 use rusqlite::Connection;
 
+use crate::capsule::budget::CapsuleConstraints;
 use crate::config::Config;
 use crate::graph::GraphState;
 use crate::graph::types::NodeId;
@@ -68,6 +69,7 @@ pub fn run_query(
     file: &str,
     symbol: Option<&str>,
     query: Option<&str>,
+    constraints: &CapsuleConstraints,
 ) -> QueryResult {
     let intent_result = match query {
         Some(q) if !q.is_empty() => intent::classify(q),
@@ -81,7 +83,7 @@ pub fn run_query(
     let search_results = search::search(conn, graph, search_query, 50).unwrap_or_default();
 
     let neighbor_ids = if let Some(ref target_id) = target {
-        collect_neighbors(graph, target_id, &intent_result, config)
+        collect_neighbors(graph, target_id, &intent_result, config, constraints)
     } else {
         Vec::new()
     };
@@ -100,9 +102,16 @@ fn collect_neighbors(
     target: &NodeId,
     intent: &IntentResult,
     config: &Config,
+    constraints: &CapsuleConstraints,
 ) -> Vec<NodeId> {
-    let node_budget = config.traversal.node_budget as usize;
+    let max_nodes = constraints.max_extended_neighbors as usize;
     let degree_cap = config.traversal.degree_cap as usize;
+
+    let node_budget = if max_nodes > 0 {
+        max_nodes
+    } else {
+        config.traversal.node_budget as usize
+    };
 
     let mut primary = traversal_for_intent(graph, target, &intent.primary, node_budget, degree_cap);
 

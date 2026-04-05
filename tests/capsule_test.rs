@@ -1,6 +1,7 @@
 // T065: Unit tests for capsule assembly — scoring, budget, ordering.
 
 use rusqlite::Connection;
+use scavenger::capsule::budget::{CapsuleConstraints, DetailLevel};
 use scavenger::config::Config;
 use scavenger::db::schema;
 use scavenger::graph::GraphState;
@@ -61,7 +62,8 @@ fn test_capsule_produces_output() {
         search_results: vec![],
     };
 
-    let result = scavenger::capsule::assemble(&conn, &g, &config, &qr, None);
+    let constraints = CapsuleConstraints::from_detail(DetailLevel::Standard);
+    let result = scavenger::capsule::assemble(&conn, &g, &config, &qr, None, &constraints);
     assert!(!result.text.is_empty(), "capsule should produce output");
     assert!(result.token_count > 0, "should have nonzero token count");
 }
@@ -78,7 +80,8 @@ fn test_capsule_respects_budget() {
         search_results: vec![],
     };
 
-    let small = scavenger::capsule::assemble(&conn, &g, &config, &qr, Some(100));
+    let constraints = CapsuleConstraints::from_detail(DetailLevel::Standard);
+    let small = scavenger::capsule::assemble(&conn, &g, &config, &qr, Some(100), &constraints);
     assert!(
         small.token_count <= 100 + 50,
         "should roughly respect budget, got {}",
@@ -98,7 +101,8 @@ fn test_capsule_with_no_target() {
         search_results: vec![],
     };
 
-    let result = scavenger::capsule::assemble(&conn, &g, &config, &qr, None);
+    let constraints = CapsuleConstraints::from_detail(DetailLevel::Standard);
+    let result = scavenger::capsule::assemble(&conn, &g, &config, &qr, None, &constraints);
     // Should still work gracefully
     assert!(result.items_included == 0 || result.text.is_empty() || !result.text.is_empty());
 }

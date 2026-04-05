@@ -570,6 +570,8 @@ fn cmd_capsule(
     g.compute_pagerank(0.85, 30);
 
     let file_str = file.to_string_lossy().to_string();
+    let constraints =
+        capsule::budget::CapsuleConstraints::from_detail(capsule::budget::DetailLevel::Standard);
     let qr = query::run_query(
         &conn,
         &g,
@@ -577,8 +579,9 @@ fn cmd_capsule(
         &file_str,
         symbol.as_deref(),
         query_str.as_deref(),
+        &constraints,
     );
-    let result = capsule::assemble(&conn, &g, &cfg, &qr, budget);
+    let result = capsule::assemble(&conn, &g, &cfg, &qr, budget, &constraints);
 
     println!("{}", result.text);
     eprintln!(
