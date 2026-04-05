@@ -1,3 +1,4 @@
+use crate::eval::{EvalError, EvalResult};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::Path;
@@ -35,6 +36,28 @@ pub struct Thresholds {
     pub agent: AgentThresholds,
 }
 
+/// Metrics for relevance eval threshold checks.
+#[derive(Debug, Clone, Copy)]
+pub enum RelevanceMetric {
+    Recall,
+    Precision,
+}
+
+/// Metrics for accuracy eval threshold checks.
+#[derive(Debug, Clone, Copy)]
+pub enum AccuracyMetric {
+    IntentAccuracy,
+    NdcgAt5,
+}
+
+/// Metrics for performance eval threshold checks.
+#[derive(Debug, Clone, Copy)]
+pub enum PerformanceMetric {
+    IndexTimePer100FilesMs,
+    CapsuleLatencyP95Ms,
+    ReindexTimeMs,
+}
+
 impl Default for Thresholds {
     fn default() -> Self {
         Self {
@@ -60,44 +83,43 @@ impl Default for Thresholds {
 }
 
 impl RelevanceThresholds {
-    pub fn passes(&self, metric: &str, value: f64) -> bool {
+    pub fn passes(&self, metric: RelevanceMetric, value: f64) -> bool {
         match metric {
-            "recall" => value >= self.min_recall,
-            "precision" => value >= self.min_precision,
-            _ => true,
+            RelevanceMetric::Recall => value >= self.min_recall,
+            RelevanceMetric::Precision => value >= self.min_precision,
         }
     }
 }
 
 impl AccuracyThresholds {
-    pub fn passes(&self, metric: &str, value: f64) -> bool {
+    pub fn passes(&self, metric: AccuracyMetric, value: f64) -> bool {
         match metric {
-            "intent_accuracy" => value >= self.min_intent_accuracy,
-            "ndcg_at_5" => value >= self.min_ndcg_at_5,
-            _ => true,
+            AccuracyMetric::IntentAccuracy => value >= self.min_intent_accuracy,
+            AccuracyMetric::NdcgAt5 => value >= self.min_ndcg_at_5,
         }
     }
 }
 
 impl PerformanceThresholds {
-    pub fn passes(&self, metric: &str, value: u64) -> bool {
+    pub fn passes(&self, metric: PerformanceMetric, value: u64) -> bool {
         match metric {
-            "index_time_per_100_files_ms" => value <= self.max_index_time_per_100_files_ms,
-            "capsule_latency_p95_ms" => value <= self.max_capsule_latency_p95_ms,
-            "reindex_time_ms" => value <= self.max_reindex_time_ms,
-            _ => true,
+            PerformanceMetric::IndexTimePer100FilesMs => {
+                value <= self.max_index_time_per_100_files_ms
+            }
+            PerformanceMetric::CapsuleLatencyP95Ms => value <= self.max_capsule_latency_p95_ms,
+            PerformanceMetric::ReindexTimeMs => value <= self.max_reindex_time_ms,
         }
     }
 }
 
-pub fn load_thresholds(path: &Path) -> Result<Thresholds, String> {
+pub fn load_thresholds(path: &Path) -> EvalResult<Thresholds> {
     if !path.exists() {
         return Ok(Thresholds::default());
     }
 
     let content =
-        fs::read_to_string(path).map_err(|e| format!("Cannot read {}: {}", path.display(), e))?;
-    let thresholds: Thresholds = toml::from_str(&content)
-        .map_err(|e| format!("Invalid TOML in {}: {}", path.display(), e))?;
+        fs::read_to_string(path).map_err(|e| EvalError::ReadError(path.to_path_buf(), e))?;
+    let thresholds: Thresholds =
+        toml::from_str(&content).map_err(|e| EvalError::ParseError(path.to_path_buf(), e))?;
     Ok(thresholds)
 }

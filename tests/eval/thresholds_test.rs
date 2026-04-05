@@ -1,4 +1,4 @@
-use scavenger::eval::thresholds::{Thresholds, load_thresholds};
+use scavenger::eval::thresholds::{RelevanceMetric, Thresholds, load_thresholds};
 use std::path::PathBuf;
 
 #[test]
@@ -17,15 +17,15 @@ fn test_load_default_thresholds() {
 #[test]
 fn test_threshold_check_pass() {
     let t = Thresholds::default();
-    assert!(t.relevance.passes("recall", 0.90));
-    assert!(t.relevance.passes("precision", 0.70));
+    assert!(t.relevance.passes(RelevanceMetric::Recall, 0.90));
+    assert!(t.relevance.passes(RelevanceMetric::Precision, 0.70));
 }
 
 #[test]
 fn test_threshold_check_fail() {
     let t = Thresholds::default();
-    assert!(!t.relevance.passes("recall", 0.50));
-    assert!(!t.relevance.passes("precision", 0.30));
+    assert!(!t.relevance.passes(RelevanceMetric::Recall, 0.50));
+    assert!(!t.relevance.passes(RelevanceMetric::Precision, 0.30));
 }
 
 #[test]
@@ -39,10 +39,8 @@ fn test_threshold_missing_file() {
 
 #[test]
 fn test_load_thresholds_custom_values() {
-    // Write a custom TOML with non-default values to verify actual parsing
-    let tmp_dir = std::env::temp_dir().join("scavenger_eval_test");
-    std::fs::create_dir_all(&tmp_dir).unwrap();
-    let custom_path = tmp_dir.join("custom_thresholds.toml");
+    let tmp_dir = tempfile::tempdir().unwrap();
+    let custom_path = tmp_dir.path().join("custom_thresholds.toml");
     std::fs::write(
         &custom_path,
         r#"
@@ -73,7 +71,5 @@ min_success_rate = 0.95
     assert_eq!(result.performance.max_capsule_latency_p95_ms, 50);
     assert_eq!(result.agent.min_token_reduction_pct, 50.0);
 
-    // Cleanup
-    std::fs::remove_file(&custom_path).unwrap();
-    std::fs::remove_dir(&tmp_dir).unwrap();
+    // tmp_dir automatically cleaned up when dropped
 }

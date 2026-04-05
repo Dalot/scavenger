@@ -9,7 +9,7 @@ repository = "https://github.com/Dalot/scavenger"
 readme = "README.md"
 keywords = ["ast", "dependency-graph", "claude", "code-intelligence", "tree-sitter"]
 categories = ["command-line-utilities", "development-tools"]
-exclude = ["scripts/", "specs/", ".cx-spec/", "tests/fixtures/", ".rdalot/"]
+exclude = ["benchmark/", "scripts/", "specs/", ".cx-spec/", "tests/fixtures/", ".rdalot/"]
 
 [lib]
 name = "scavenger"
