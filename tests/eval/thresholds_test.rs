@@ -1,4 +1,4 @@
-use scavenger::eval::thresholds::{RelevanceMetric, Thresholds, load_thresholds};
+use scavenger::eval::{RelevanceMetric, Thresholds, load_thresholds};
 use std::path::PathBuf;
 
 #[test]

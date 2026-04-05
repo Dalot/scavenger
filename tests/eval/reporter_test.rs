@@ -1,5 +1,5 @@
-use scavenger::eval::reporter::{print_json, print_summary, run_suite};
 use scavenger::eval::{CaseResult, EvalTier};
+use scavenger::eval::{print_json, print_summary, run_suite};
 use std::collections::HashMap;
 
 fn make_test_results() -> Vec<CaseResult> {

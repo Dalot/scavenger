@@ -3,26 +3,26 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::Path;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct RelevanceThresholds {
     pub min_recall: f64,
     pub min_precision: f64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AccuracyThresholds {
     pub min_intent_accuracy: f64,
     pub min_ndcg_at_5: f64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct PerformanceThresholds {
     pub max_index_time_per_100_files_ms: u64,
     pub max_capsule_latency_p95_ms: u64,
     pub max_reindex_time_ms: u64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AgentThresholds {
     pub min_token_reduction_pct: f64,
     pub min_success_rate: f64,
@@ -30,9 +30,13 @@ pub struct AgentThresholds {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Thresholds {
+    #[serde(default)]
     pub relevance: RelevanceThresholds,
+    #[serde(default)]
     pub accuracy: AccuracyThresholds,
+    #[serde(default)]
     pub performance: PerformanceThresholds,
+    #[serde(default)]
     pub agent: AgentThresholds,
 }
 
