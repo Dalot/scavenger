@@ -153,7 +153,7 @@ fn test_capsule_detailed_includes_body_when_requested() {
         search_results: vec![],
     };
 
-    let mut constraints = CapsuleConstraints::from_detail(DetailLevel::Detailed);
+    let constraints = CapsuleConstraints::from_detail(DetailLevel::Detailed);
     assert!(
         constraints.include_body,
         "detailed should default to include_body=true"

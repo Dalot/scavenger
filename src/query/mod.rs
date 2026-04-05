@@ -107,11 +107,7 @@ fn collect_neighbors(
     let max_nodes = constraints.max_extended_neighbors as usize;
     let degree_cap = config.traversal.degree_cap as usize;
 
-    let node_budget = if max_nodes > 0 {
-        max_nodes
-    } else {
-        config.traversal.node_budget as usize
-    };
+    let node_budget = if max_nodes > 0 { max_nodes } else { 0 };
 
     let mut primary = traversal_for_intent(graph, target, &intent.primary, node_budget, degree_cap);
 

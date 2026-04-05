@@ -163,7 +163,12 @@ pub fn assemble(
         })
     });
 
-    let text = render::render(&candidates, target_body.as_ref(), constraints.include_body);
+    let text = render::render(
+        &candidates,
+        target_body.as_ref(),
+        constraints.include_body,
+        effective_budget,
+    );
     let token_count = (text.len() / 4) as u32;
     let render_us = t5.elapsed().as_micros() as u64;
 

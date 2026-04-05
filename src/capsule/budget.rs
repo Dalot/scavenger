@@ -17,7 +17,10 @@ impl FromStr for DetailLevel {
         match s.to_lowercase().as_str() {
             "minimal" | "min" => Ok(Self::Minimal),
             "detailed" | "detail" | "full" => Ok(Self::Detailed),
-            _ => Ok(Self::Standard),
+            _ => {
+                tracing::warn!("unknown detail_level '{}', defaulting to standard", s);
+                Ok(Self::Standard)
+            }
         }
     }
 }
@@ -123,6 +126,28 @@ impl CapsuleConstraints {
             max_extended_neighbors: level.max_extended_neighbors(),
             include_body: level.include_body(),
         }
+    }
+
+    pub fn with_overrides(
+        mut self,
+        max_callers: Option<u32>,
+        max_callees: Option<u32>,
+        max_annotations: Option<u32>,
+        include_body: Option<bool>,
+    ) -> Self {
+        if let Some(v) = max_callers {
+            self.max_callers = v;
+        }
+        if let Some(v) = max_callees {
+            self.max_callees = v;
+        }
+        if let Some(v) = max_annotations {
+            self.max_annotations = v;
+        }
+        if let Some(v) = include_body {
+            self.include_body = v;
+        }
+        self
     }
 }
 

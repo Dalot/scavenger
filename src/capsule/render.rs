@@ -81,11 +81,13 @@ pub struct TargetBody {
 /// RENDER stage: emit the final capsule text following section ordering per FR-018.
 /// Order: [!] → [TARGET] → [CALLERS] → [CALLEES] → [CONTEXT] → [DOCUMENTATION] → [BODY]
 /// Empty sections are omitted. Scores are NOT in output.
-/// If `target_body` is provided and `include_body` is true, the full body is appended.
+/// If `target_body` is provided and `include_body` is true, the full body is appended
+/// only if it fits within the remaining budget.
 pub fn render(
     candidates: &[CandidateItem],
     target_body: Option<&TargetBody>,
     include_body: bool,
+    effective_budget: u32,
 ) -> String {
     let section_order = [
         OutputGroup::Signal,
@@ -117,7 +119,11 @@ pub fn render(
         && let Some(tb) = target_body
         && let Ok(body_text) = read_body_from_file(&tb.file_path, tb.line_start, tb.line_end)
     {
-        sections.push(format!("[BODY] {}\n{}", tb.name, body_text));
+        let current_tokens: u32 = sections.iter().map(|s| (s.len() / 4) as u32).sum();
+        let body_tokens = (body_text.len() / 4) as u32;
+        if current_tokens + body_tokens <= effective_budget {
+            sections.push(format!("[BODY] {}\n{}", tb.name, body_text));
+        }
     }
 
     sections.join("\n\n")
@@ -279,7 +285,7 @@ mod tests {
                 OutputGroup::Callers,
             ),
         ];
-        let output = render(&items, None, true);
+        let output = render(&items, None, true, 1000);
         let signal_pos = output.find("[!]").unwrap();
         let target_pos = output.find("[TARGET]").unwrap();
         let callers_pos = output.find("[CALLERS]").unwrap();
@@ -296,7 +302,7 @@ mod tests {
             true,
             OutputGroup::Target,
         )];
-        let output = render(&items, None, true);
+        let output = render(&items, None, true, 1000);
         assert!(output.contains("[TARGET]"));
         assert!(!output.contains("[CALLERS]"));
     }
@@ -322,7 +328,7 @@ mod tests {
             name: "hello".to_string(),
         };
 
-        let output = render(&items, Some(&tb), true);
+        let output = render(&items, Some(&tb), true, 1000);
         assert!(
             output.contains("[BODY] hello"),
             "should include [BODY] section: {output}"
@@ -350,7 +356,7 @@ mod tests {
             name: "hello".to_string(),
         };
 
-        let output = render(&items, Some(&tb), true);
+        let output = render(&items, Some(&tb), true, 1000);
         assert!(
             !output.contains("[BODY]"),
             "should not include [BODY] when file does not exist"
@@ -378,7 +384,7 @@ mod tests {
             name: "hello".to_string(),
         };
 
-        let output = render(&items, Some(&tb), false);
+        let output = render(&items, Some(&tb), false, 1000);
         assert!(
             !output.contains("[BODY]"),
             "should not include [BODY] when include_body=false: {output}"

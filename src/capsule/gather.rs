@@ -80,13 +80,17 @@ pub fn gather(
     // 2. Graph neighbors via traversal
     if let Some(ref target_id) = query_result.target {
         let one_hop = traversal::one_hop_neighbors(graph, target_id);
-        let is_caller = |nid: &NodeId| graph.callers_of(target_id).iter().any(|c| c.id == *nid);
+        let caller_ids: std::collections::HashSet<_> = graph
+            .callers_of(target_id)
+            .iter()
+            .map(|c| c.id.clone())
+            .collect();
 
         let mut caller_count: u32 = 0;
         let mut callee_count: u32 = 0;
 
         for neighbor_id in &one_hop {
-            let is_call = is_caller(neighbor_id);
+            let is_call = caller_ids.contains(neighbor_id);
             if is_call {
                 if caller_count >= constraints.max_callers {
                     continue;
@@ -141,9 +145,7 @@ pub fn gather(
                     false,
                     false,
                 ));
-                if constraints.max_extended_neighbors > 0 {
-                    extended_count += 1;
-                }
+                extended_count += 1;
             }
         }
     }
