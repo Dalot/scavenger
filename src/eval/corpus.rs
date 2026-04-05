@@ -10,12 +10,12 @@ pub struct CorpusEntry {
     pub tracked_files: Option<usize>,
 }
 
-pub fn load_corpus(root: &Path) -> EvalResult<Vec<CorpusEntry>> {
+pub fn load_corpus(root: &Path) -> EvalResult<CorpusEntry> {
     if !root.exists() {
         return Err(EvalError::CorpusNotFound(root.to_path_buf()));
     }
 
-    Ok(vec![CorpusEntry {
+    Ok(CorpusEntry {
         name: root
             .file_name()
             .unwrap_or_default()
@@ -23,7 +23,7 @@ pub fn load_corpus(root: &Path) -> EvalResult<Vec<CorpusEntry>> {
             .to_string(),
         path: root.to_path_buf(),
         tracked_files: git_tracked_file_count(root),
-    }])
+    })
 }
 
 fn git_tracked_file_count(path: &Path) -> Option<usize> {

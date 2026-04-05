@@ -7,10 +7,9 @@ fn test_load_corpus_single_project() {
     let fixtures = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/sample_project");
     let result = load_corpus(&fixtures);
     assert!(result.is_ok());
-    let entries = result.unwrap();
-    assert_eq!(entries.len(), 1);
-    assert_eq!(entries[0].name, "sample_project");
-    assert_eq!(entries[0].path, fixtures);
+    let entry = result.unwrap();
+    assert_eq!(entry.name, "sample_project");
+    assert_eq!(entry.path, fixtures);
 }
 
 #[test]
@@ -29,8 +28,8 @@ fn test_load_corpus_non_git_has_no_tracked_files() {
     fs::create_dir_all(proj.join("src")).unwrap();
     fs::write(proj.join("src").join("main.rs"), "fn main() {}").unwrap();
 
-    let result = load_corpus(&proj).unwrap();
-    assert!(result[0].tracked_files.is_none());
+    let entry = load_corpus(&proj).unwrap();
+    assert!(entry.tracked_files.is_none());
 }
 
 #[test]
@@ -66,7 +65,6 @@ fn test_load_corpus_git_tracked_files() {
         .output()
         .unwrap();
 
-    let result = load_corpus(&proj).unwrap();
-    assert_eq!(result.len(), 1);
-    assert_eq!(result[0].tracked_files, Some(2));
+    let entry = load_corpus(&proj).unwrap();
+    assert_eq!(entry.tracked_files, Some(2));
 }
