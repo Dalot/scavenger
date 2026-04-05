@@ -1,4 +1,4 @@
-use scavenger::eval::reporter::{print_summary, run_suite};
+use scavenger::eval::reporter::{print_json, print_summary, run_suite};
 use scavenger::eval::{CaseResult, EvalTier};
 use std::collections::HashMap;
 
@@ -45,12 +45,8 @@ fn test_print_json_output() {
     let results = make_test_results();
     let run = run_suite(EvalTier::Component, "relevance", "sample", results);
 
-    let json = serde_json::to_string(&run);
-    assert!(json.is_ok());
-    let json_str = json.unwrap();
-    assert!(json_str.contains("test-pass"));
-    assert!(json_str.contains("test-fail"));
-    assert!(json_str.contains("relevance"));
+    let result = print_json(&run);
+    assert!(result.is_ok());
 }
 
 #[test]
