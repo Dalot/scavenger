@@ -1,4 +1,4 @@
-use scavenger::eval::corpus::load_corpus;
+use scavenger::eval::{EvalError, corpus::load_corpus};
 use std::fs;
 use std::path::PathBuf;
 
@@ -17,27 +17,32 @@ fn test_load_corpus_missing() {
     let missing = PathBuf::from("/nonexistent/path");
     let result = load_corpus(&missing);
     assert!(result.is_err());
+    let err = result.unwrap_err();
+    assert!(matches!(err, EvalError::CorpusNotFound(_)));
 }
 
 #[test]
-fn test_load_corpus_has_file_count() {
-    let fixtures = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/sample_project");
-    let result = load_corpus(&fixtures).unwrap();
-    assert!(result[0].file_count > 0);
+fn test_load_corpus_non_git_has_no_tracked_files() {
+    let temp_dir = tempfile::tempdir().unwrap();
+    let proj = temp_dir.path().join("no_git_project");
+    fs::create_dir_all(proj.join("src")).unwrap();
+    fs::write(proj.join("src").join("main.rs"), "fn main() {}").unwrap();
+
+    let result = load_corpus(&proj).unwrap();
+    assert!(result[0].tracked_files.is_none());
 }
 
 #[test]
 fn test_load_corpus_multi_project() {
-    let eval_corpus = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("eval/corpus");
-    // Create two temporary project dirs
-    let proj_a = eval_corpus.join("test_proj_a");
-    let proj_b = eval_corpus.join("test_proj_b");
+    let temp_dir = tempfile::tempdir().unwrap();
+    let proj_a = temp_dir.path().join("test_proj_a");
+    let proj_b = temp_dir.path().join("test_proj_b");
     fs::create_dir_all(proj_a.join("src")).unwrap();
     fs::create_dir_all(proj_b.join("src")).unwrap();
     fs::write(proj_a.join("src").join("main.rs"), "fn main() {}").unwrap();
     fs::write(proj_b.join("src").join("lib.rs"), "pub fn lib() {}").unwrap();
 
-    let result = load_corpus(&eval_corpus).unwrap();
+    let result = load_corpus(temp_dir.path()).unwrap();
     let names: Vec<&str> = result.iter().map(|e| e.name.as_str()).collect();
     assert!(
         names.contains(&"test_proj_a"),
@@ -49,26 +54,60 @@ fn test_load_corpus_multi_project() {
         "test_proj_b not found in {:?}",
         names
     );
-
-    // Cleanup
-    fs::remove_dir_all(proj_a).unwrap();
-    fs::remove_dir_all(proj_b).unwrap();
+    // temp_dir automatically cleaned up when dropped
 }
 
 #[test]
 fn test_load_corpus_skips_hidden_dirs() {
-    let fixtures = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/sample_project");
-    // Create a hidden dir with source files
-    let hidden = fixtures.join(".hidden_dir");
-    fs::create_dir_all(&hidden).unwrap();
-    fs::write(hidden.join("secret.rs"), "fn secret() {}").unwrap();
+    let temp_dir = tempfile::tempdir().unwrap();
+    let visible = temp_dir.path().join("visible_project");
+    let hidden = temp_dir.path().join(".hidden_project");
+    fs::create_dir_all(visible.join("src")).unwrap();
+    fs::create_dir_all(hidden.join("src")).unwrap();
+    fs::write(visible.join("src").join("main.rs"), "fn main() {}").unwrap();
+    fs::write(hidden.join("src").join("secret.rs"), "fn secret() {}").unwrap();
 
-    let result = load_corpus(&fixtures).unwrap();
-    let baseline_count = result[0].file_count;
+    let result = load_corpus(temp_dir.path()).unwrap();
+    let names: Vec<&str> = result.iter().map(|e| e.name.as_str()).collect();
+    assert!(names.contains(&"visible_project"));
+    assert!(!names.contains(&".hidden_project"));
+}
 
-    // The hidden dir's files should NOT be counted
-    assert_eq!(baseline_count, result[0].file_count);
+#[test]
+fn test_load_corpus_git_tracked_files() {
+    let temp_dir = tempfile::tempdir().unwrap();
+    let proj = temp_dir.path().join("git_project");
+    fs::create_dir_all(&proj).unwrap();
+    fs::write(proj.join("main.rs"), "fn main() {}").unwrap();
+    fs::write(proj.join("lib.rs"), "pub fn lib() {}").unwrap();
 
-    // Cleanup
-    fs::remove_dir_all(hidden).unwrap();
+    // Initialize git repo and commit files
+    std::process::Command::new("git")
+        .arg("init")
+        .current_dir(&proj)
+        .output()
+        .unwrap();
+    std::process::Command::new("git")
+        .arg("add")
+        .arg(".")
+        .current_dir(&proj)
+        .output()
+        .unwrap();
+    std::process::Command::new("git")
+        .args([
+            "-c",
+            "user.email=test@test.com",
+            "-c",
+            "user.name=test",
+            "commit",
+            "-m",
+            "init",
+        ])
+        .current_dir(&proj)
+        .output()
+        .unwrap();
+
+    let result = load_corpus(temp_dir.path()).unwrap();
+    assert_eq!(result.len(), 1);
+    assert_eq!(result[0].tracked_files, Some(2));
 }
