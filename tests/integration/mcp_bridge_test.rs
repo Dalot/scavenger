@@ -135,4 +135,19 @@ fn test_bridge_server_info() {
             .is_some_and(|i| i.contains("capsule")),
         "server info instructions should mention capsules"
     );
+
+    // Verify key concepts are documented
+    let instructions = info.instructions.as_ref().unwrap();
+    assert!(
+        instructions.contains("query"),
+        "instructions should mention 'query' parameter"
+    );
+    assert!(
+        instructions.contains("detail_level"),
+        "instructions should mention 'detail_level'"
+    );
+    assert!(
+        instructions.contains("write_annotation"),
+        "instructions should mention write_annotation"
+    );
 }

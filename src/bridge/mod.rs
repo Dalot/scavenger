@@ -311,10 +311,21 @@ impl ServerHandler for ScavengerBridge {
     fn get_info(&self) -> ServerInfo {
         ServerInfo {
             instructions: Some(
-                "Scavenger: AST dependency graph and session memory engine. \
-                 Prefer get_capsule over grep/read for code navigation — it resolves \
-                 callers, callees, and impact from the graph directly. \
-                 Use write_annotation to persist cross-session knowledge."
+                "Scavenger: AST dependency graph and session memory engine.\n\
+                 \n\
+                 PREFER get_capsule OVER grep/read for code navigation:\n\
+                 • It resolves callers, callees, and impact from the graph directly\n\
+                 • Use the 'query' parameter with natural language to guide context selection:\n\
+                   - 'error', 'bug', 'fix' → Debug intent (prioritizes upstream callers)\n\
+                   - 'refactor', 'extract' → Refactor intent (blast radius via callees)\n\
+                   - 'explain', 'what does' → Understand intent (bidirectional)\n\
+                   - 'add', 'implement' → Extend intent (downstream neighbors)\n\
+                   - 'review', 'check' → Review intent (bidirectional)\n\
+                 • detail_level controls token budget: minimal (~200-800), standard (~800-3000), detailed (~3000-8000)\n\
+                 \n\
+                 PERSIST cross-session knowledge with write_annotation:\n\
+                 • Anchor facts, decisions, or notes to symbols, files, or scopes\n\
+                 • Annotations are included in get_capsule results automatically"
                     .into(),
             ),
             capabilities: ServerCapabilities::builder().enable_tools().build(),
