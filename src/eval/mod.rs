@@ -1,10 +1,17 @@
-pub mod accuracy;
-pub mod agent;
-pub mod corpus;
-pub mod relevance;
-pub mod reporter;
-pub mod runner;
-pub mod thresholds;
+pub(crate) mod accuracy;
+pub(crate) mod agent;
+pub(crate) mod corpus;
+pub(crate) mod relevance;
+pub(crate) mod reporter;
+pub(crate) mod runner;
+pub(crate) mod thresholds;
+
+pub use corpus::{CorpusEntry, load_corpus};
+pub use reporter::{print_json, print_summary, run_suite};
+pub use thresholds::{
+    AccuracyMetric, AccuracyThresholds, AgentThresholds, PerformanceMetric, PerformanceThresholds,
+    RelevanceMetric, RelevanceThresholds, Thresholds, load_thresholds,
+};
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
