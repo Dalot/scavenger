@@ -195,7 +195,23 @@ NOTES:
 
     #[tool(
         name = "read_annotations",
-        description = "Retrieve annotations and session memory. At session start, call with session_summary=true to resume from prior sessions (activity, stale annotations, active signals). Per-node annotations are also included in get_capsule results automatically."
+        description = r#"Retrieve annotations and session memory.
+
+Use at session start with session_summary=true to resume from prior sessions.
+Per-node annotations are automatically included in get_capsule results.
+
+PARAMETERS:
+  anchor_type         Filter by type: 'node', 'file', 'scope'
+  anchor_value        Filter by specific symbol, file, or scope name
+  tags                Comma-separated tags to filter by
+  query               Full-text search across annotation text and tags
+  session_summary     Return a session start summary (set to true at session start)
+  limit               Maximum results (default 10)
+
+EXAMPLE:
+  read_annotations({ session_summary: true })
+  read_annotations({ anchor_type: "file", anchor_value: "src/main.rs" })
+  read_annotations({ query: "authentication" })"#
     )]
     async fn read_annotations(
         &self,
@@ -227,7 +243,23 @@ NOTES:
 
     #[tool(
         name = "write_annotation",
-        description = "Persist a fact, decision, or note anchored to code. Creates a new annotation or updates an existing one. Use for cross-session knowledge: architectural decisions, discovered bugs, learned patterns. Anchor to a symbol, file, or scope for precise future retrieval via get_capsule and read_annotations."
+        description = r#"Persist a fact, decision, or note anchored to code.
+
+Use for cross-session knowledge: architectural decisions, discovered bugs, learned patterns.
+Annotations are retrieved via read_annotations and included in get_capsule results.
+
+PARAMETERS:
+  text (required)      The annotation text
+  id                   Update existing annotation by ID (omit to create new)
+  tags                 Comma-separated keywords for retrieval (e.g. 'auth,jwt,redis')
+  kind                 Annotation type: 'fact' (default), 'strategy', 'pitfall', 'context'
+  symbol               Anchor to a symbol (resolved via search)
+  file                 Anchor to a file path (if no symbol)
+  scope                Anchor to a scope name (e.g. 'auth', 'api')
+
+EXAMPLE:
+  write_annotation({ text: "Uses deprecated crypto API - migrate to ring", tags: "security,crypto", symbol: "encryptPassword" })
+  write_annotation({ text: "High traffic endpoint - 10k req/s", kind: "context", file: "src/api/handler.rs" })"#
     )]
     async fn write_annotation(
         &self,
