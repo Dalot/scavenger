@@ -67,6 +67,86 @@ fn test_bridge_get_capsule_has_file_param() {
 }
 
 #[test]
+fn test_bridge_get_capsule_description_documents_output_format() {
+    let bridge = make_bridge();
+    let tools = bridge.tool_router.list_all();
+    let capsule_tool = tools
+        .iter()
+        .find(|t| t.name.as_ref() == "get_capsule")
+        .unwrap();
+    let desc = capsule_tool.description.as_ref().unwrap();
+
+    assert!(
+        desc.contains("[TARGET]"),
+        "description should document [TARGET] output section"
+    );
+    assert!(
+        desc.contains("[CALLERS]"),
+        "description should document [CALLERS] output section"
+    );
+    assert!(
+        desc.contains("[CALLEES]"),
+        "description should document [CALLEES] output section"
+    );
+    assert!(
+        desc.contains("[CONTEXT]"),
+        "description should document [CONTEXT] output section"
+    );
+}
+
+#[test]
+fn test_bridge_get_capsule_description_documents_query_intent() {
+    let bridge = make_bridge();
+    let tools = bridge.tool_router.list_all();
+    let capsule_tool = tools
+        .iter()
+        .find(|t| t.name.as_ref() == "get_capsule")
+        .unwrap();
+    let desc = capsule_tool.description.as_ref().unwrap();
+
+    assert!(
+        desc.contains("Debug"),
+        "description should document Debug intent"
+    );
+    assert!(
+        desc.contains("Refactor"),
+        "description should document Refactor intent"
+    );
+    assert!(
+        desc.contains("Understand"),
+        "description should document Understand intent"
+    );
+    assert!(
+        desc.contains("error") || desc.contains("bug") || desc.contains("fix"),
+        "description should mention debug keywords"
+    );
+}
+
+#[test]
+fn test_bridge_get_capsule_description_documents_examples() {
+    let bridge = make_bridge();
+    let tools = bridge.tool_router.list_all();
+    let capsule_tool = tools
+        .iter()
+        .find(|t| t.name.as_ref() == "get_capsule")
+        .unwrap();
+    let desc = capsule_tool.description.as_ref().unwrap();
+
+    assert!(
+        desc.contains("EXAMPLES:"),
+        "description should have examples section"
+    );
+    assert!(
+        desc.contains("query:"),
+        "description should show query parameter in examples"
+    );
+    assert!(
+        desc.contains("detail_level:"),
+        "description should show detail_level in examples"
+    );
+}
+
+#[test]
 fn test_bridge_write_annotation_has_text_param() {
     let bridge = make_bridge();
     let tools = bridge.tool_router.list_all();
