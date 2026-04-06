@@ -108,7 +108,50 @@ impl ScavengerBridge {
 impl ScavengerBridge {
     #[tool(
         name = "get_capsule",
-        description = "Primary navigation tool — replaces grep and file reads for structural questions. Pass a symbol name to get its callers, callees, and what would break if it changed (no grep needed). Pass a file path to get focused context within a token budget instead of reading the raw file. Returns signatures, dependency neighborhood, annotations, and behavioral signals from the AST graph.\n\nParameters:\n- detail_level: Control context depth. \"minimal\" = target + 1-hop only (~200-800 tokens). \"standard\" (default) = full structural context + annotations (~800-3000 tokens). \"detailed\" = everything including doc chunks and full body (~3000-8000 tokens).\n- max_callers: Override max caller count (default from detail_level).\n- max_callees: Override max callee count (default from detail_level).\n- max_annotations: Override max annotation count (default from detail_level).\n- include_body: Whether to include full function body if budget allows (default from detail_level)."
+        description = r#"Primary navigation tool — replaces grep and file reads for structural questions.
+
+Use when you need to understand code structure, find callers/callees, assess impact, or debug.
+Returns signatures, dependency neighborhood, annotations, and behavioral signals from the AST graph.
+
+OUTPUT FORMAT:
+  [!]           Behavioral signals (ephemeral diagnostics: thrashing, untested, etc.)
+  [TARGET]      The queried symbol: name, file:line, signature, docstring
+  [CALLERS]     Functions that call the target (1-hop)
+  [CALLEES]     Functions the target calls (1-hop)
+  [CONTEXT]     Annotations and version history
+  [DOCUMENTATION] Relevant docs from FTS5 search (detailed level only)
+  [BODY]        Full source body (detailed level only, if budget allows)
+
+PARAMETERS:
+  file (required)       File path relative to project root
+  symbol                Symbol name. If omitted, targets the first function in the file.
+  query                 Your intent or question — drives context selection:
+                          • Debug: "error", "bug", "fix", "crash" → traces upstream callers
+                          • Refactor: "extract", "rename", "restructure" → blast radius (callees)
+                          • Understand: "explain", "what does", "how does" → bidirectional
+                          • Extend: "add", "implement", "create" → downstream neighbors
+                          • Review: "check", "audit", "validate" → bidirectional
+                        If omitted, defaults to bidirectional traversal.
+  detail_level          "minimal" (~200-800 tokens) | "standard" (~800-3000) | "detailed" (~3000-8000)
+  budget                Token budget override (default 8000). Caps effective output.
+  max_callers           Override max caller count (default from detail_level)
+  max_callees           Override max callee count (default from detail_level)
+  max_annotations       Override max annotation count (default from detail_level)
+  include_body          Include full function body if budget allows
+
+EXAMPLES:
+  # Find what's calling a function (debug intent)
+  get_capsule({ file: "src/auth.rs", symbol: "validateToken", query: "why is this failing?" })
+
+  # Understand a file's structure
+  get_capsule({ file: "src/main.rs", detail_level: "minimal" })
+
+  # Full context for implementing a feature
+  get_capsule({ file: "src/db.rs", symbol: "executeQuery", detail_level: "detailed", query: "how does this work so I can add transaction support?" })
+
+NOTES:
+  • If symbol not found: returns priority docs + annotations only (no structural context)
+  • detail_level sets defaults for doc_chunks, history, extended_neighbors (overrides don't affect these)"#
     )]
     async fn get_capsule(&self, params: Parameters<GetCapsuleParams>) -> Result<String, String> {
         let p = params.0;
