@@ -18,6 +18,20 @@ pub struct GetCapsuleParams {
     pub symbol: Option<String>,
     /// Your intent or question — drives context selection strategy.
     pub query: Option<String>,
+    /// Control context depth. "minimal" = target + 1-hop only (~200-800 tokens).
+    /// "standard" (default) = full structural context + annotations (~800-3000 tokens).
+    /// "detailed" = everything including doc chunks and full body (~3000-8000 tokens).
+    pub detail_level: Option<String>,
+    /// Token budget override (default from config, typically 8000).
+    pub budget: Option<u32>,
+    /// Override max caller count (default from detail_level).
+    pub max_callers: Option<u32>,
+    /// Override max callee count (default from detail_level).
+    pub max_callees: Option<u32>,
+    /// Override max annotation count (default from detail_level).
+    pub max_annotations: Option<u32>,
+    /// Whether to include full function body if budget allows (default from detail_level).
+    pub include_body: Option<bool>,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -94,7 +108,50 @@ impl ScavengerBridge {
 impl ScavengerBridge {
     #[tool(
         name = "get_capsule",
-        description = "Primary navigation tool — replaces grep and file reads for structural questions. Pass a symbol name to get its callers, callees, and what would break if it changed (no grep needed). Pass a file path to get focused context within a token budget instead of reading the raw file. Returns signatures, dependency neighborhood, annotations, and behavioral signals from the AST graph."
+        description = r#"Primary navigation tool — replaces grep and file reads for structural questions.
+
+Use when you need to understand code structure, find callers/callees, assess impact, or debug.
+Returns signatures, dependency neighborhood, annotations, and behavioral signals from the AST graph.
+
+OUTPUT FORMAT:
+  [!]           Behavioral signals (ephemeral diagnostics: thrashing, untested, etc.)
+  [TARGET]      The queried symbol: name, file:line, signature, docstring
+  [CALLERS]     Functions that call the target (1-hop)
+  [CALLEES]     Functions the target calls (1-hop)
+  [CONTEXT]     Annotations and version history
+  [DOCUMENTATION] Relevant docs from FTS5 search (detailed level only)
+  [BODY]        Full source body (detailed level only, if budget allows)
+
+PARAMETERS:
+  file (required)       File path relative to project root
+  symbol                Symbol name. If omitted, targets the first function in the file.
+  query                 Your intent or question — drives context selection:
+                          • Debug: "error", "bug", "fix", "crash" → traces upstream callers
+                          • Refactor: "extract", "rename", "restructure" → blast radius (callees)
+                          • Understand: "explain", "what does", "how does" → bidirectional
+                          • Extend: "add", "implement", "create" → downstream neighbors
+                          • Review: "check", "audit", "validate" → bidirectional
+                        If omitted, defaults to bidirectional traversal.
+  detail_level          "minimal" (~200-800 tokens) | "standard" (~800-3000) | "detailed" (~3000-8000)
+  budget                Token budget override (default 8000). Caps effective output.
+  max_callers           Override max caller count (default from detail_level)
+  max_callees           Override max callee count (default from detail_level)
+  max_annotations       Override max annotation count (default from detail_level)
+  include_body          Include full function body if budget allows
+
+EXAMPLES:
+  # Find what's calling a function (debug intent)
+  get_capsule({ file: "src/auth.rs", symbol: "validateToken", query: "why is this failing?" })
+
+  # Understand a file's structure
+  get_capsule({ file: "src/main.rs", detail_level: "minimal" })
+
+  # Full context for implementing a feature
+  get_capsule({ file: "src/db.rs", symbol: "executeQuery", detail_level: "detailed", query: "how does this work so I can add transaction support?" })
+
+NOTES:
+  • If symbol not found: returns priority docs + annotations only (no structural context)
+  • detail_level sets defaults for doc_chunks, history, extended_neighbors (overrides don't affect these)"#
     )]
     async fn get_capsule(&self, params: Parameters<GetCapsuleParams>) -> Result<String, String> {
         let p = params.0;
@@ -108,6 +165,24 @@ impl ScavengerBridge {
         if let Some(q) = &p.query {
             req["query"] = json!(q);
         }
+        if let Some(dl) = &p.detail_level {
+            req["detail_level"] = json!(dl);
+        }
+        if let Some(b) = p.budget {
+            req["budget"] = json!(b);
+        }
+        if let Some(mc) = p.max_callers {
+            req["max_callers"] = json!(mc);
+        }
+        if let Some(mc) = p.max_callees {
+            req["max_callees"] = json!(mc);
+        }
+        if let Some(ma) = p.max_annotations {
+            req["max_annotations"] = json!(ma);
+        }
+        if let Some(ib) = p.include_body {
+            req["include_body"] = json!(ib);
+        }
         let resp = self.uds_request(&req).await;
 
         if let Some(err) = resp.get("error").and_then(|v| v.as_str()) {
@@ -120,7 +195,23 @@ impl ScavengerBridge {
 
     #[tool(
         name = "read_annotations",
-        description = "Retrieve annotations and session memory. At session start, call with session_summary=true to resume from prior sessions (activity, stale annotations, active signals). Per-node annotations are also included in get_capsule results automatically."
+        description = r#"Retrieve annotations and session memory.
+
+Use at session start with session_summary=true to resume from prior sessions.
+Per-node annotations are automatically included in get_capsule results.
+
+PARAMETERS:
+  anchor_type         Filter by type: 'node', 'file', 'scope'
+  anchor_value        Filter by specific symbol, file, or scope name
+  tags                Comma-separated tags to filter by
+  query               Full-text search across annotation text and tags
+  session_summary     Return a session start summary (set to true at session start)
+  limit               Maximum results (default 10)
+
+EXAMPLE:
+  read_annotations({ session_summary: true })
+  read_annotations({ anchor_type: "file", anchor_value: "src/main.rs" })
+  read_annotations({ query: "authentication" })"#
     )]
     async fn read_annotations(
         &self,
@@ -152,7 +243,23 @@ impl ScavengerBridge {
 
     #[tool(
         name = "write_annotation",
-        description = "Persist a fact, decision, or note anchored to code. Creates a new annotation or updates an existing one. Use for cross-session knowledge: architectural decisions, discovered bugs, learned patterns. Anchor to a symbol, file, or scope for precise future retrieval via get_capsule and read_annotations."
+        description = r#"Persist a fact, decision, or note anchored to code.
+
+Use for cross-session knowledge: architectural decisions, discovered bugs, learned patterns.
+Annotations are retrieved via read_annotations and included in get_capsule results.
+
+PARAMETERS:
+  text (required)      The annotation text
+  id                   Update existing annotation by ID (omit to create new)
+  tags                 Comma-separated keywords for retrieval (e.g. 'auth,jwt,redis')
+  kind                 Annotation type: 'fact' (default), 'strategy', 'pitfall', 'context'
+  symbol               Anchor to a symbol (resolved via search)
+  file                 Anchor to a file path (if no symbol)
+  scope                Anchor to a scope name (e.g. 'auth', 'api')
+
+EXAMPLE:
+  write_annotation({ text: "Uses deprecated crypto API - migrate to ring", tags: "security,crypto", symbol: "encryptPassword" })
+  write_annotation({ text: "High traffic endpoint - 10k req/s", kind: "context", file: "src/api/handler.rs" })"#
     )]
     async fn write_annotation(
         &self,
@@ -236,10 +343,21 @@ impl ServerHandler for ScavengerBridge {
     fn get_info(&self) -> ServerInfo {
         ServerInfo {
             instructions: Some(
-                "Scavenger: AST dependency graph and session memory engine. \
-                 Prefer get_capsule over grep/read for code navigation — it resolves \
-                 callers, callees, and impact from the graph directly. \
-                 Use write_annotation to persist cross-session knowledge."
+                "Scavenger: AST dependency graph and session memory engine.\n\
+                 \n\
+                 PREFER get_capsule OVER grep/read for code navigation:\n\
+                 • It resolves callers, callees, and impact from the graph directly\n\
+                 • Use the 'query' parameter with natural language to guide context selection:\n\
+                   - 'error', 'bug', 'fix' → Debug intent (prioritizes upstream callers)\n\
+                   - 'refactor', 'extract' → Refactor intent (blast radius via callees)\n\
+                   - 'explain', 'what does' → Understand intent (bidirectional)\n\
+                   - 'add', 'implement' → Extend intent (downstream neighbors)\n\
+                   - 'review', 'check' → Review intent (bidirectional)\n\
+                 • detail_level controls token budget: minimal (~200-800), standard (~800-3000), detailed (~3000-8000)\n\
+                 \n\
+                 PERSIST cross-session knowledge with write_annotation:\n\
+                 • Anchor facts, decisions, or notes to symbols, files, or scopes\n\
+                 • Annotations are included in get_capsule results automatically"
                     .into(),
             ),
             capabilities: ServerCapabilities::builder().enable_tools().build(),

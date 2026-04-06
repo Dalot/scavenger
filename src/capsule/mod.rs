@@ -1,7 +1,9 @@
+pub mod budget;
 pub mod gather;
 pub mod render;
 pub mod score;
 
+use budget::CapsuleConstraints;
 use rusqlite::Connection;
 
 use crate::config::Config;
@@ -80,6 +82,7 @@ pub fn assemble(
     config: &Config,
     query_result: &QueryResult,
     budget_override: Option<u32>,
+    constraints: &CapsuleConstraints,
 ) -> CapsuleResult {
     use std::time::Instant;
 
@@ -88,7 +91,7 @@ pub fn assemble(
 
     // Stage 1: GATHER
     let t0 = Instant::now();
-    let mut candidates = gather::gather(conn, graph, config, query_result);
+    let mut candidates = gather::gather(conn, graph, config, query_result, constraints);
     let gather_us = t0.elapsed().as_micros() as u64;
 
     if candidates.is_empty() {
@@ -149,8 +152,6 @@ pub fn assemble(
 
     // Stage 6: RENDER
     let t5 = Instant::now();
-    let remaining =
-        effective_budget.saturating_sub(candidates.iter().map(|c| c.token_count).sum::<u32>());
 
     let target_body = query_result.target.as_ref().and_then(|tid| {
         let node = graph.get_weight(tid)?;
@@ -162,7 +163,12 @@ pub fn assemble(
         })
     });
 
-    let text = render::render(&candidates, remaining, target_body.as_ref());
+    let text = render::render(
+        &candidates,
+        target_body.as_ref(),
+        constraints.include_body,
+        effective_budget,
+    );
     let token_count = (text.len() / 4) as u32;
     let render_us = t5.elapsed().as_micros() as u64;
 
@@ -215,8 +221,9 @@ mod tests {
             neighbor_ids: Vec::new(),
             search_results: Vec::new(),
         };
+        let constraints = budget::CapsuleConstraints::from_detail(budget::DetailLevel::Standard);
 
-        let result = assemble(&conn, &graph, &config, &qr, None);
+        let result = assemble(&conn, &graph, &config, &qr, None, &constraints);
         assert!(result.text.is_empty());
     }
 
@@ -241,8 +248,9 @@ mod tests {
             neighbor_ids: Vec::new(),
             search_results: Vec::new(),
         };
+        let constraints = budget::CapsuleConstraints::from_detail(budget::DetailLevel::Standard);
 
-        let result = assemble(&conn, &graph, &config, &qr, None);
+        let result = assemble(&conn, &graph, &config, &qr, None, &constraints);
         assert!(result.text.contains("[TARGET]"));
         assert!(result.text.contains("fn hello()"));
         assert!(result.items_included >= 1);
