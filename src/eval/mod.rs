@@ -8,6 +8,7 @@ pub(crate) mod thresholds;
 
 pub use corpus::{CorpusEntry, load_corpus};
 pub use reporter::{print_json, print_summary, run_suite};
+pub use runner::{EvalOptions, EvalSuite, run_evals};
 pub use thresholds::{
     AccuracyMetric, AccuracyThresholds, AgentThresholds, PerformanceMetric, PerformanceThresholds,
     RelevanceMetric, RelevanceThresholds, Thresholds, load_thresholds,
@@ -55,6 +56,7 @@ pub struct SuiteSummary {
 pub enum EvalTier {
     Component,
     Agent,
+    All,
 }
 
 #[derive(Debug, Clone, Serialize)]

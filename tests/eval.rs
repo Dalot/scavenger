@@ -1,5 +1,6 @@
 mod eval {
     mod corpus_test;
     mod reporter_test;
+    mod runner_test;
     mod thresholds_test;
 }
