@@ -228,12 +228,17 @@ pub fn compute_content_hash(
     text: &str,
 ) -> String {
     let mut hasher = Sha256::new();
-    hasher.update(anchor_type.unwrap_or(""));
-    hasher.update("|");
-    hasher.update(anchor_value.unwrap_or(""));
-    hasher.update("|");
-    hasher.update(normalize_text(text));
-    format!("{:x}", hasher.finalize())
+    hasher.update(anchor_type.unwrap_or("").as_bytes());
+    hasher.update(b"|");
+    hasher.update(anchor_value.unwrap_or("").as_bytes());
+    hasher.update(b"|");
+    hasher.update(normalize_text(text).as_bytes());
+    hasher
+        .finalize()
+        .as_ref()
+        .iter()
+        .map(|b| format!("{:02x}", b))
+        .collect()
 }
 
 /// Decay quality for all annotations anchored to a node (called on THRASHING/DEAD_END).
