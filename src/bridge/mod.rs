@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 
+use rmcp::handler::server::router::tool::ToolRouter;
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{ServerCapabilities, ServerInfo};
 use rmcp::{ServerHandler, tool, tool_handler, tool_router};
@@ -335,7 +336,7 @@ EXAMPLE:
     }
 }
 
-#[tool_handler]
+#[tool_handler(tool_router = ToolRouter<ScavengerBridge>)]
 impl ServerHandler for ScavengerBridge {
     fn get_info(&self) -> ServerInfo {
         ServerInfo {
