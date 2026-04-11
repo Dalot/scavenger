@@ -89,6 +89,27 @@ async fn handle_capsule(state: &Arc<DaemonState>, request: &Value) -> Value {
         .get("budget")
         .and_then(|v| v.as_u64())
         .map(|b| b as u32);
+    let detail_level = request.get("detail_level").and_then(|v| v.as_str());
+    let max_callers = request
+        .get("max_callers")
+        .and_then(|v| v.as_u64())
+        .map(|v| v as u32);
+    let max_callees = request
+        .get("max_callees")
+        .and_then(|v| v.as_u64())
+        .map(|v| v as u32);
+    let max_annotations = request
+        .get("max_annotations")
+        .and_then(|v| v.as_u64())
+        .map(|v| v as u32);
+    let include_body = request.get("include_body").and_then(|v| v.as_bool());
+
+    let constraints = capsule::budget::CapsuleConstraints::from_detail(
+        detail_level
+            .and_then(|s| s.parse().ok())
+            .unwrap_or_default(),
+    )
+    .with_overrides(max_callers, max_callees, max_annotations, include_body);
 
     let start = Instant::now();
 
@@ -104,12 +125,27 @@ async fn handle_capsule(state: &Arc<DaemonState>, request: &Value) -> Value {
     };
 
     let query_start = Instant::now();
-    let query_result = query::run_query(conn, &graph, &state.config, file, symbol, query_str);
+    let query_result = query::run_query(
+        conn,
+        &graph,
+        &state.config,
+        file,
+        symbol,
+        query_str,
+        &constraints,
+    );
     let query_us = query_start.elapsed().as_micros() as u64;
     state.metrics.query_latency_us.record(query_us);
 
     let assemble_start = Instant::now();
-    let result = capsule::assemble(conn, &graph, &state.config, &query_result, budget);
+    let result = capsule::assemble(
+        conn,
+        &graph,
+        &state.config,
+        &query_result,
+        budget,
+        &constraints,
+    );
     let assemble_us = assemble_start.elapsed().as_micros() as u64;
 
     let total_us = start.elapsed().as_micros() as u64;
@@ -137,6 +173,7 @@ async fn handle_capsule(state: &Arc<DaemonState>, request: &Value) -> Value {
         file = %file,
         symbol = symbol.unwrap_or(""),
         intent = ?query_result.intent.primary,
+        detail_level = ?constraints.detail_level,
         tokens = result.token_count,
         items = result.items_included,
         empty = result.text.is_empty(),

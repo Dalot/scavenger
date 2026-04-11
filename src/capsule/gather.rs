@@ -6,6 +6,7 @@ use crate::graph::traversal;
 use crate::graph::types::NodeId;
 use crate::query::QueryResult;
 
+use super::budget::CapsuleConstraints;
 use super::{CandidateItem, CandidateSource};
 
 fn new_candidate(
@@ -57,6 +58,7 @@ pub fn gather(
     graph: &GraphState,
     config: &Config,
     query_result: &QueryResult,
+    constraints: &CapsuleConstraints,
 ) -> Vec<CandidateItem> {
     let mut candidates = Vec::new();
 
@@ -78,13 +80,31 @@ pub fn gather(
     // 2. Graph neighbors via traversal
     if let Some(ref target_id) = query_result.target {
         let one_hop = traversal::one_hop_neighbors(graph, target_id);
+        let caller_ids: std::collections::HashSet<_> = graph
+            .callers_of(target_id)
+            .iter()
+            .map(|c| c.id.clone())
+            .collect();
+
+        let mut caller_count: u32 = 0;
+        let mut callee_count: u32 = 0;
+
         for neighbor_id in &one_hop {
+            let is_call = caller_ids.contains(neighbor_id);
+            if is_call {
+                if caller_count >= constraints.max_callers {
+                    continue;
+                }
+                caller_count += 1;
+            } else {
+                if callee_count >= constraints.max_callees {
+                    continue;
+                }
+                callee_count += 1;
+            }
+
             if let Some(w) = graph.get_weight(neighbor_id) {
-                let is_caller = graph
-                    .callers_of(target_id)
-                    .iter()
-                    .any(|c| c.id == *neighbor_id);
-                let source = if is_caller {
+                let source = if is_call {
                     CandidateSource::Caller
                 } else {
                     CandidateSource::Callee
@@ -102,10 +122,16 @@ pub fn gather(
         }
 
         // Extended neighbors from query traversal
+        let mut extended_count: u32 = 0;
         for neighbor_id in &query_result.neighbor_ids {
             if candidates
                 .iter()
                 .any(|c| c.node_id.as_ref() == Some(neighbor_id))
+            {
+                continue;
+            }
+            if constraints.max_extended_neighbors > 0
+                && extended_count >= constraints.max_extended_neighbors
             {
                 continue;
             }
@@ -119,18 +145,24 @@ pub fn gather(
                     false,
                     false,
                 ));
+                extended_count += 1;
             }
         }
     }
 
     // 3. Annotations — node-anchored, file-anchored, and project-level
     if let Some(ref target_id) = query_result.target {
-        gather_annotations(conn, graph, target_id, &mut candidates);
+        gather_annotations(conn, graph, target_id, &mut candidates, constraints);
     }
 
     // 4. Node version history for target
     if let Some(ref target_id) = query_result.target {
-        gather_node_history(conn, target_id, &mut candidates);
+        gather_node_history(
+            conn,
+            target_id,
+            &mut candidates,
+            constraints.max_node_history,
+        );
     }
 
     // 5. Behavioral signals
@@ -139,20 +171,26 @@ pub fn gather(
     }
 
     // 6. Doc chunks via FTS5 search + unconditional priority docs
-    gather_doc_chunks(conn, config, query_result, &mut candidates);
+    gather_doc_chunks(
+        conn,
+        config,
+        query_result,
+        &mut candidates,
+        constraints.max_doc_chunks,
+    );
 
     candidates
 }
 
 const DISTILL_THRESHOLD: usize = 5;
 const DISTILL_KEEP: usize = 3;
-const PROJECT_LEVEL_CAP: usize = 3;
 
 fn gather_annotations(
     conn: &Connection,
     graph: &GraphState,
     target_id: &NodeId,
     candidates: &mut Vec<CandidateItem>,
+    constraints: &CapsuleConstraints,
 ) {
     // Node-anchored annotations for the target
     if let Ok(mut annotations) =
@@ -178,6 +216,10 @@ fn gather_annotations(
             summary.anchor_type = Some("node".to_string());
             candidates.push(summary);
             annotations.truncate(DISTILL_KEEP);
+        }
+        let node_cap = constraints.max_annotations as usize;
+        if node_cap > 0 {
+            annotations.truncate(node_cap);
         }
         for ann in annotations {
             let prefix = annotation_prefix(&ann.kind, ann.stale);
@@ -227,6 +269,10 @@ fn gather_annotations(
                 candidates.push(summary);
                 annotations.truncate(DISTILL_KEEP);
             }
+            let file_cap = constraints.max_file_annotations as usize;
+            if file_cap > 0 {
+                annotations.truncate(file_cap);
+            }
             for ann in annotations {
                 let prefix = annotation_prefix(&ann.kind, ann.stale);
                 let content = format!("{prefix} {}", ann.text);
@@ -249,14 +295,17 @@ fn gather_annotations(
         }
     }
 
-    // Project-level annotations (anchor_type IS NULL), capped at PROJECT_LEVEL_CAP
-    if let Ok(mut annotations) = crate::db::queries::get_project_level_annotations(conn) {
+    // Project-level annotations (anchor_type IS NULL), capped at constraints.max_project_annotations
+    let project_cap = constraints.max_project_annotations as usize;
+    if project_cap > 0
+        && let Ok(mut annotations) = crate::db::queries::get_project_level_annotations(conn)
+    {
         annotations.sort_by(|a, b| {
             b.quality
                 .partial_cmp(&a.quality)
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
-        annotations.truncate(PROJECT_LEVEL_CAP);
+        annotations.truncate(project_cap);
         for ann in annotations {
             let prefix = annotation_prefix(&ann.kind, ann.stale);
             let content = format!("{prefix} {}", ann.text);
@@ -279,14 +328,22 @@ fn gather_annotations(
     }
 }
 
-fn gather_node_history(conn: &Connection, target_id: &NodeId, candidates: &mut Vec<CandidateItem>) {
+fn gather_node_history(
+    conn: &Connection,
+    target_id: &NodeId,
+    candidates: &mut Vec<CandidateItem>,
+    max_history: u32,
+) {
+    if max_history == 0 {
+        return;
+    }
     if let Some(sig_hash) = crate::db::queries::get_node_signature_hash(conn, &target_id.0)
-        && let Ok(versions) = crate::memory::versions::get_recent_versions(conn, &sig_hash, 5)
+        && let Ok(versions) =
+            crate::memory::versions::get_recent_versions(conn, &sig_hash, max_history)
     {
         if versions.len() < 2 {
             return;
         }
-        // Compare consecutive versions to determine change type
         for (i, ver) in versions.iter().enumerate().skip(1) {
             let prev = &versions[i - 1];
             let significance = compute_change_significance(prev, ver);
@@ -343,8 +400,10 @@ fn gather_doc_chunks(
     config: &Config,
     query_result: &QueryResult,
     candidates: &mut Vec<CandidateItem>,
+    max_doc_chunks: u32,
 ) {
     let mut seen_files = std::collections::HashSet::new();
+    let mut chunk_count: u32 = 0;
 
     // Priority docs are unconditionally included ONLY for project-level queries
     // (queries without a specific target node). For file/symbol-specific queries,
@@ -353,8 +412,14 @@ fn gather_doc_chunks(
 
     if is_project_level_query {
         for priority_name in &config.docs.priority {
+            if max_doc_chunks > 0 && chunk_count >= max_doc_chunks {
+                break;
+            }
             if let Ok(chunks) = crate::db::queries::get_doc_chunks_for_file(conn, priority_name) {
                 for m in chunks {
+                    if max_doc_chunks > 0 && chunk_count >= max_doc_chunks {
+                        break;
+                    }
                     let heading = m.heading.as_deref().unwrap_or("(untitled)");
                     let content = format!("[doc: {} > {}]\n{}", m.file_path, heading, m.content);
                     candidates.push(new_candidate(
@@ -367,6 +432,7 @@ fn gather_doc_chunks(
                         true,
                     ));
                     seen_files.insert(m.file_path);
+                    chunk_count += 1;
                 }
             }
         }
@@ -378,10 +444,15 @@ fn gather_doc_chunks(
         .first()
         .map(|r| r.node_id.0.clone())
         .unwrap_or_default();
-    if !search_query.is_empty()
+    if max_doc_chunks > 0
+        && chunk_count < max_doc_chunks
+        && !search_query.is_empty()
         && let Ok(doc_matches) = crate::db::queries::search_doc_chunks_fts(conn, &search_query, 5)
     {
         for m in doc_matches {
+            if max_doc_chunks > 0 && chunk_count >= max_doc_chunks {
+                break;
+            }
             if seen_files.contains(&m.file_path) {
                 continue;
             }
@@ -397,6 +468,7 @@ fn gather_doc_chunks(
                 false,
                 is_priority,
             ));
+            chunk_count += 1;
         }
     }
 }
@@ -475,7 +547,16 @@ mod tests {
         }
 
         let mut candidates = Vec::new();
-        gather_annotations(&conn, &graph, &NodeId("n1".to_string()), &mut candidates);
+        let constraints = super::super::budget::CapsuleConstraints::from_detail(
+            super::super::budget::DetailLevel::Detailed,
+        );
+        gather_annotations(
+            &conn,
+            &graph,
+            &NodeId("n1".to_string()),
+            &mut candidates,
+            &constraints,
+        );
         let ann_count = candidates
             .iter()
             .filter(|c| c.source == CandidateSource::Annotation)
@@ -505,7 +586,16 @@ mod tests {
         }
 
         let mut candidates = Vec::new();
-        gather_annotations(&conn, &graph, &NodeId("n1".to_string()), &mut candidates);
+        let constraints = super::super::budget::CapsuleConstraints::from_detail(
+            super::super::budget::DetailLevel::Detailed,
+        );
+        gather_annotations(
+            &conn,
+            &graph,
+            &NodeId("n1".to_string()),
+            &mut candidates,
+            &constraints,
+        );
         let ann_items: Vec<_> = candidates
             .iter()
             .filter(|c| {
@@ -548,7 +638,16 @@ mod tests {
         }
 
         let mut candidates = Vec::new();
-        gather_annotations(&conn, &graph, &NodeId("n1".to_string()), &mut candidates);
+        let constraints = super::super::budget::CapsuleConstraints::from_detail(
+            super::super::budget::DetailLevel::Detailed,
+        );
+        gather_annotations(
+            &conn,
+            &graph,
+            &NodeId("n1".to_string()),
+            &mut candidates,
+            &constraints,
+        );
         let project_items: Vec<_> = candidates
             .iter()
             .filter(|c| c.source == CandidateSource::Annotation && c.anchor_type.is_none())
@@ -598,7 +697,16 @@ mod tests {
         };
 
         let mut candidates = Vec::new();
-        gather_doc_chunks(&conn, &config, &query_with_target, &mut candidates);
+        let constraints = super::super::budget::CapsuleConstraints::from_detail(
+            super::super::budget::DetailLevel::Standard,
+        );
+        gather_doc_chunks(
+            &conn,
+            &config,
+            &query_with_target,
+            &mut candidates,
+            constraints.max_doc_chunks,
+        );
 
         let doc_chunks: Vec<_> = candidates
             .iter()
@@ -620,7 +728,16 @@ mod tests {
         };
 
         candidates.clear();
-        gather_doc_chunks(&conn, &config, &query_without_target, &mut candidates);
+        let constraints = super::super::budget::CapsuleConstraints::from_detail(
+            super::super::budget::DetailLevel::Detailed,
+        );
+        gather_doc_chunks(
+            &conn,
+            &config,
+            &query_without_target,
+            &mut candidates,
+            constraints.max_doc_chunks,
+        );
 
         let doc_chunks: Vec<_> = candidates
             .iter()

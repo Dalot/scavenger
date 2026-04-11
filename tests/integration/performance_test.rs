@@ -68,10 +68,21 @@ fn test_capsule_latency_under_200ms() {
 
     let config = scavenger::config::Config::default();
     let file_str = src_dir.join("main.rs").to_string_lossy().to_string();
+    let constraints = scavenger::capsule::budget::CapsuleConstraints::from_detail(
+        scavenger::capsule::budget::DetailLevel::Standard,
+    );
 
     let start = Instant::now();
-    let qr = scavenger::query::run_query(&conn, &g, &config, &file_str, Some("func_0"), None);
-    let capsule = scavenger::capsule::assemble(&conn, &g, &config, &qr, None);
+    let qr = scavenger::query::run_query(
+        &conn,
+        &g,
+        &config,
+        &file_str,
+        Some("func_0"),
+        None,
+        &constraints,
+    );
+    let capsule = scavenger::capsule::assemble(&conn, &g, &config, &qr, None, &constraints);
     let elapsed = start.elapsed();
 
     assert!(!capsule.text.is_empty());
