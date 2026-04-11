@@ -233,12 +233,7 @@ pub fn compute_content_hash(
     hasher.update(anchor_value.unwrap_or("").as_bytes());
     hasher.update(b"|");
     hasher.update(normalize_text(text).as_bytes());
-    hasher
-        .finalize()
-        .as_ref()
-        .iter()
-        .map(|b| format!("{:02x}", b))
-        .collect()
+    hasher.finalize().as_ref().iter().map(|b| format!("{:02x}", b)).collect()
 }
 
 /// Decay quality for all annotations anchored to a node (called on THRASHING/DEAD_END).
