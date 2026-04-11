@@ -1,6 +1,5 @@
 use std::path::PathBuf;
 
-use rmcp::handler::server::tool::ToolRouter;
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{ServerCapabilities, ServerInfo};
 use rmcp::{ServerHandler, tool, tool_handler, tool_router};
@@ -85,14 +84,12 @@ pub struct SearchDocsParams {
 #[derive(Clone)]
 pub struct ScavengerBridge {
     socket_path: PathBuf,
-    pub tool_router: ToolRouter<Self>,
 }
 
 impl ScavengerBridge {
     pub fn new(socket_path: PathBuf) -> Self {
         Self {
             socket_path: socket_path.clone(),
-            tool_router: Self::tool_router(),
         }
     }
 
