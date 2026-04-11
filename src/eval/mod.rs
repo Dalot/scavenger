@@ -7,6 +7,7 @@ pub(crate) mod runner;
 pub(crate) mod thresholds;
 
 pub use corpus::{CorpusEntry, load_corpus};
+pub use relevance::{run_performance_checks, run_relevance_eval};
 pub use reporter::{print_json, print_summary, run_suite};
 pub use runner::{EvalOptions, EvalSuite, run_evals};
 pub use thresholds::{
