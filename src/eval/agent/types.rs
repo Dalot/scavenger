@@ -44,10 +44,30 @@ pub struct AgentResult {
     pub baseline: Option<TokenUsage>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub enum AgentType {
     Claude,
     Cursor,
+    OpenCode,
+}
+
+impl AgentType {
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s.to_lowercase().as_str() {
+            "claude" => Some(AgentType::Claude),
+            "cursor" => Some(AgentType::Cursor),
+            "opencode" => Some(AgentType::OpenCode),
+            _ => None,
+        }
+    }
+
+    pub fn cli_name(&self) -> &'static str {
+        match self {
+            AgentType::Claude => "claude",
+            AgentType::Cursor => "cursor",
+            AgentType::OpenCode => "opencode",
+        }
+    }
 }
 
 impl std::fmt::Display for AgentType {
@@ -55,6 +75,7 @@ impl std::fmt::Display for AgentType {
         match self {
             AgentType::Claude => write!(f, "claude"),
             AgentType::Cursor => write!(f, "cursor"),
+            AgentType::OpenCode => write!(f, "opencode"),
         }
     }
 }
