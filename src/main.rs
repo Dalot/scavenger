@@ -175,15 +175,67 @@ enum Commands {
         /// Follow the log in real-time (like tail -f)
         #[arg(long, short)]
         follow: bool,
+
         /// Filter by minimum log level (trace, debug, info, warn, error)
         #[arg(long, default_value = "info")]
         level: String,
+
         /// Filter by span/method name (e.g. "capsule", "reindex", "hook_post")
         #[arg(long)]
         method: Option<String>,
+
         /// Number of recent lines to show (default: 50)
         #[arg(long, short, default_value = "50")]
         lines: usize,
+    },
+
+    /// Run evaluation suites to measure Scavenger's quality and performance
+    Eval {
+        /// Which eval suite to run: relevance, accuracy, performance, agent
+        #[arg(long)]
+        suite: Option<String>,
+
+        /// Run all suites (default)
+        #[arg(long)]
+        all: bool,
+
+        /// Which tier to run: component, agent, all
+        #[arg(long, default_value = "component")]
+        tier: String,
+
+        /// Code to evaluate against — the project(s) that Scavenger will
+        /// index and run evals on. Can point to a single project directory
+        /// or a directory of projects. Defaults to eval/corpus/
+        #[arg(long)]
+        corpus: Option<String>,
+
+        /// Run agent tasks matching this glob pattern
+        #[arg(long)]
+        tasks: Option<String>,
+
+        /// Which AI agent to use for tier-2 evals: claude, cursor
+        #[arg(long)]
+        agent: Option<String>,
+
+        /// Output results as structured JSON
+        #[arg(long)]
+        json: bool,
+
+        /// Use a custom thresholds file instead of eval/thresholds.toml
+        #[arg(long)]
+        thresholds: Option<String>,
+
+        /// Run agent eval without Scavenger (baseline only)
+        #[arg(long)]
+        baseline: bool,
+
+        /// Compare results against a previous eval run
+        #[arg(long)]
+        compare: Option<String>,
+
+        /// Generate an HTML report from the last eval run
+        #[arg(long)]
+        report: bool,
     },
 }
 
@@ -362,6 +414,21 @@ fn main() {
             method,
             lines,
         } => cmd_logs(follow, level, method, lines),
+        Commands::Eval {
+            suite,
+            all,
+            tier,
+            corpus,
+            tasks,
+            agent,
+            json,
+            thresholds,
+            baseline,
+            compare,
+            report,
+        } => cmd_eval(
+            suite, all, tier, corpus, tasks, agent, json, thresholds, baseline, compare, report,
+        ),
     };
 
     if let Err(e) = result {
@@ -1759,6 +1826,77 @@ fn cmd_db(command: DbCommands) -> Result<(), Box<dyn std::error::Error>> {
         }
     }
     Ok(())
+}
+
+fn cmd_eval(
+    suite: Option<String>,
+    all: bool,
+    tier: String,
+    corpus: Option<String>,
+    tasks: Option<String>,
+    agent: Option<String>,
+    json: bool,
+    thresholds: Option<String>,
+    baseline: bool,
+    compare: Option<String>,
+    report: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    use scavenger::eval::{EvalOptions, EvalSuite, EvalTier, run_evals};
+
+    let suites = if all || suite.is_none() {
+        vec![
+            EvalSuite::Relevance,
+            EvalSuite::Accuracy,
+            EvalSuite::Performance,
+        ]
+    } else {
+        match suite.as_deref() {
+            Some("relevance") => vec![EvalSuite::Relevance],
+            Some("accuracy") => vec![EvalSuite::Accuracy],
+            Some("performance") => vec![EvalSuite::Performance],
+            Some("agent") => vec![EvalSuite::Agent],
+            Some(other) => {
+                eprintln!("Unknown suite: {}", other);
+                return Ok(());
+            }
+            None => vec![],
+        }
+    };
+
+    let eval_tier = match tier.as_str() {
+        "component" => EvalTier::Component,
+        "agent" => EvalTier::Agent,
+        "all" => EvalTier::All,
+        _ => EvalTier::Component,
+    };
+
+    let opts = EvalOptions {
+        suites,
+        tier: eval_tier,
+        corpus_path: corpus,
+        json,
+        thresholds_path: thresholds,
+        agent,
+        tasks_pattern: tasks,
+        baseline,
+        compare_run_id: compare,
+        report,
+    };
+
+    match run_evals(&opts) {
+        Ok(runs) => {
+            let runs: Vec<scavenger::eval::EvalRun> = runs;
+            let any_failed = runs.iter().any(|r| r.summary.failed > 0);
+            if any_failed {
+                std::process::exit(1);
+            }
+            Ok(())
+        }
+        Err(e) => {
+            eprintln!("Eval error: {}", e);
+            std::process::exit(1);
+        }
+    }
 }
 
 fn cmd_mcp_bridge() -> Result<(), Box<dyn std::error::Error>> {
