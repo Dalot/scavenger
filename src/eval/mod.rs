@@ -6,6 +6,7 @@ pub(crate) mod reporter;
 pub(crate) mod runner;
 pub(crate) mod thresholds;
 
+pub use accuracy::run_accuracy_eval;
 pub use corpus::{CorpusEntry, load_corpus};
 pub use relevance::{run_performance_checks, run_relevance_eval};
 pub use reporter::{print_json, print_summary, run_suite};
