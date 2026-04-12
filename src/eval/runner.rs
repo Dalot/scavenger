@@ -4,6 +4,42 @@ use crate::eval::reporter::{print_json, print_summary, run_suite};
 use crate::eval::{CaseResult, EvalRun, EvalTier};
 use std::path::{Path, PathBuf};
 
+fn load_corpus_directory(root: &Path) -> Result<Vec<CorpusEntry>, String> {
+    if !root.exists() {
+        return Err(format!("Corpus directory not found: {}", root.display()));
+    }
+
+    let mut entries = Vec::new();
+    let subdirs = ["fixtures", "repos"];
+    for subdir in &subdirs {
+        let subdir_path = root.join(subdir);
+        if subdir_path.exists()
+            && let Ok(dir_entries) = std::fs::read_dir(&subdir_path)
+        {
+            for entry in dir_entries.flatten() {
+                let path = entry.path();
+                if path.is_dir()
+                    && !path
+                        .file_name()
+                        .map(|n| n.to_string_lossy().starts_with('.'))
+                        .unwrap_or(true)
+                    && let Ok(e) = load_corpus(&path)
+                {
+                    entries.push(e);
+                }
+            }
+        }
+    }
+
+    if entries.is_empty()
+        && let Ok(e) = load_corpus(root)
+    {
+        entries.push(e);
+    }
+
+    Ok(entries)
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum EvalSuite {
     Relevance,
@@ -50,7 +86,7 @@ impl Default for EvalOptions {
 pub fn run_evals(opts: &EvalOptions) -> Result<Vec<EvalRun>, String> {
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap_or_else(|_| ".".to_string());
 
-    let corpus_path = opts
+    let _corpus_path = opts
         .corpus_path
         .as_ref()
         .map(PathBuf::from)
@@ -65,8 +101,13 @@ pub fn run_evals(opts: &EvalOptions) -> Result<Vec<EvalRun>, String> {
     let thresholds = crate::eval::thresholds::load_thresholds(&thresholds_path)
         .map_err(|e| format!("Failed to load thresholds: {}", e))?;
 
-    let corpus_entries =
-        vec![load_corpus(&corpus_path).map_err(|e| format!("Failed to load corpus: {}", e))?];
+    let corpus_path = opts
+        .corpus_path
+        .as_ref()
+        .map(PathBuf::from)
+        .unwrap_or_else(|| Path::new(&manifest_dir).join("eval/corpus"));
+
+    let corpus_entries = load_corpus_directory(&corpus_path)?;
 
     if corpus_entries.is_empty() {
         return Err(
