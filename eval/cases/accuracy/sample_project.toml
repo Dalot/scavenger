@@ -1,0 +1,11 @@
+[[case]]
+name = "intent-find-callers"
+corpus = "sample_project"
+query = "who calls main"
+expected_intent = "Understand"
+
+[[case]]
+name = "intent-find-implementation"
+corpus = "sample_project"
+query = "how does greet work"
+expected_intent = "Understand"
