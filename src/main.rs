@@ -504,13 +504,13 @@ fn cmd_init() -> Result<(), Box<dyn std::error::Error>> {
     eprintln!("  Creating Claude Code plugin...");
     hooks::register::create_plugin(&project_root)?;
 
-    // Step 5b: Register MCP bridge (Claude Code)
-    eprintln!("  Registering MCP bridge (Claude Code)...");
-    let claude_cli_ok = hooks::register::register_mcp_via_cli(&project_root)?;
-    if claude_cli_ok {
-        eprintln!("    Registered via `claude mcp add`");
+    // Step 5b: Register MCP bridge (any available agent CLI)
+    eprintln!("  Registering MCP bridge (agent CLI)...");
+    let _cli_ok = hooks::register::register_mcp_via_cli(&project_root)?;
+    if let Some(agent) = hooks::register::detect_available_agent() {
+        eprintln!("    Registered via `{} mcp add`", agent.cli_name());
     } else {
-        eprintln!("    `claude` CLI not found — register manually with:");
+        eprintln!("    No agent CLI found — register manually with:");
         eprintln!("    claude mcp add scavenger -- scavenger mcp-bridge");
     }
     hooks::register::register_mcp_server(&project_root)?;

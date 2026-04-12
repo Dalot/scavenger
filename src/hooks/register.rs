@@ -12,6 +12,39 @@ pub enum PluginError {
     Json(#[from] serde_json::Error),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AgentType {
+    Claude,
+    Cursor,
+    OpenCode,
+}
+
+impl AgentType {
+    #[allow(clippy::should_implement_trait, dead_code)]
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s.to_lowercase().as_str() {
+            "claude" => Some(AgentType::Claude),
+            "cursor" => Some(AgentType::Cursor),
+            "opencode" => Some(AgentType::OpenCode),
+            _ => None,
+        }
+    }
+
+    pub fn cli_name(&self) -> &'static str {
+        match self {
+            AgentType::Claude => "claude",
+            AgentType::Cursor => "cursor",
+            AgentType::OpenCode => "opencode",
+        }
+    }
+}
+
+impl std::fmt::Display for AgentType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.cli_name())
+    }
+}
+
 const SCAVENGER_PRE_CMD: &str = "scavenger hook pre-tool-use";
 const SCAVENGER_POST_CMD: &str = "scavenger hook post-tool-use";
 const SCAVENGER_AUDIT_CMD: &str = "scavenger hook audit";
@@ -252,38 +285,69 @@ pub fn create_plugin(project_root: &Path) -> Result<(), PluginError> {
     Ok(())
 }
 
-// ── Claude Code CLI integration ─────────────────────────────────────
+// ── Agent CLI integration ──────────────────────────────────────────────
 
-/// Try registering the MCP bridge via `claude mcp add`. Returns `Ok(true)` if
-/// the CLI was found and registration succeeded, `Ok(false)` if `claude` is not
-/// on PATH or the command failed. Never returns an error for missing CLI.
-pub fn register_mcp_via_cli(project_root: &Path) -> Result<bool, PluginError> {
-    let status = std::process::Command::new("claude")
-        .args(["mcp", "add", "scavenger", "--", "scavenger", "mcp-bridge"])
-        .current_dir(project_root)
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status();
-
-    match status {
-        Ok(s) if s.success() => Ok(true),
-        _ => Ok(false),
+/// Check which agent CLI is available (Claude, Cursor, or OpenCode).
+/// Returns the first available agent type, or None if none are found.
+pub fn detect_available_agent() -> Option<AgentType> {
+    for agent_type in &[AgentType::Claude, AgentType::Cursor, AgentType::OpenCode] {
+        if check_agent_cli(agent_type) {
+            return Some(*agent_type);
+        }
     }
+    None
 }
 
-/// Try removing the scavenger MCP entry via `claude mcp remove`.
-pub fn remove_mcp_via_cli(project_root: &Path) -> Result<bool, PluginError> {
-    let status = std::process::Command::new("claude")
-        .args(["mcp", "remove", "scavenger"])
-        .current_dir(project_root)
+/// Check if a specific agent CLI is available on PATH.
+fn check_agent_cli(agent_type: &AgentType) -> bool {
+    std::process::Command::new(agent_type.cli_name())
+        .arg("--version")
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
-        .status();
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
 
-    match status {
-        Ok(s) if s.success() => Ok(true),
-        _ => Ok(false),
+/// Try registering the MCP bridge via any available agent CLI.
+/// Returns `Ok(true)` if registration succeeded, `Ok(false)` if no CLI found or failed.
+pub fn register_mcp_via_cli(project_root: &Path) -> Result<bool, PluginError> {
+    for agent_type in &[AgentType::Claude, AgentType::Cursor, AgentType::OpenCode] {
+        let cli_name = agent_type.cli_name();
+        let result = std::process::Command::new(cli_name)
+            .args(["mcp", "add", "scavenger", "--", "scavenger", "mcp-bridge"])
+            .current_dir(project_root)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status();
+
+        if let Ok(s) = result
+            && s.success()
+        {
+            return Ok(true);
+        }
     }
+    Ok(false)
+}
+
+/// Try removing the scavenger MCP entry via any available agent CLI.
+pub fn remove_mcp_via_cli(project_root: &Path) -> Result<bool, PluginError> {
+    for agent_type in &[AgentType::Claude, AgentType::Cursor, AgentType::OpenCode] {
+        let cli_name = agent_type.cli_name();
+        let result = std::process::Command::new(cli_name)
+            .args(["mcp", "remove", "scavenger"])
+            .current_dir(project_root)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status();
+
+        if let Ok(s) = result
+            && s.success()
+        {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 // ── .mcp.json (de-facto standard for MCP-compatible tools) ──────────

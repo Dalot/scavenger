@@ -1,3 +1,4 @@
+use crate::eval::agent::types::AgentType;
 use crate::eval::corpus::{CorpusEntry, load_corpus};
 use crate::eval::reporter::{print_json, print_summary, run_suite};
 use crate::eval::{CaseResult, EvalRun, EvalTier};
@@ -130,22 +131,29 @@ fn run_agent_suite(
     }
 
     let tasks_dir = Path::new(manifest_dir).join("eval/tasks");
-    let agent_type = opts.agent.as_deref().unwrap_or("claude");
+    let agent_str = opts.agent.as_deref().unwrap_or("claude");
+    let agent_type =
+        AgentType::from_str(agent_str).ok_or_else(|| format!("Unknown agent: {}", agent_str))?;
 
     let agent_results = match agent_type {
-        "claude" => crate::eval::agent::claude_runner::run_claude_evals(
+        AgentType::Claude => crate::eval::agent::claude_runner::run_claude_evals(
             &tasks_dir,
             corpus_path,
             opts.tasks_pattern.as_deref(),
             opts.baseline,
         )?,
-        "cursor" => crate::eval::agent::cursor_runner::run_cursor_evals(
+        AgentType::Cursor => crate::eval::agent::cursor_runner::run_cursor_evals(
             &tasks_dir,
             corpus_path,
             opts.tasks_pattern.as_deref(),
             opts.baseline,
         )?,
-        _ => return Err(format!("Unknown agent: {}", agent_type)),
+        AgentType::OpenCode => crate::eval::agent::opencode_runner::run_opencode_evals(
+            &tasks_dir,
+            corpus_path,
+            opts.tasks_pattern.as_deref(),
+            opts.baseline,
+        )?,
     };
 
     let case_results: Vec<CaseResult> = agent_results
