@@ -85,6 +85,7 @@ pub struct SearchDocsParams {
 #[derive(Clone)]
 pub struct ScavengerBridge {
     socket_path: PathBuf,
+    #[allow(dead_code)]
     pub tool_router: ToolRouter<Self>,
 }
 
@@ -341,8 +342,11 @@ EXAMPLE:
 #[tool_handler]
 impl ServerHandler for ScavengerBridge {
     fn get_info(&self) -> ServerInfo {
-        ServerInfo {
-            instructions: Some(
+        use rmcp::model::Implementation;
+
+        ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
+            .with_server_info(Implementation::new("scavenger", env!("CARGO_PKG_VERSION")))
+            .with_instructions(
                 "Scavenger: AST dependency graph and session memory engine.\n\
                  \n\
                  PREFER get_capsule OVER grep/read for code navigation:\n\
@@ -357,12 +361,8 @@ impl ServerHandler for ScavengerBridge {
                  \n\
                  PERSIST cross-session knowledge with write_annotation:\n\
                  • Anchor facts, decisions, or notes to symbols, files, or scopes\n\
-                 • Annotations are included in get_capsule results automatically"
-                    .into(),
-            ),
-            capabilities: ServerCapabilities::builder().enable_tools().build(),
-            ..ServerInfo::default()
-        }
+                 • Annotations are included in get_capsule results automatically",
+            )
     }
 }
 
