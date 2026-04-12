@@ -60,6 +60,7 @@ pub enum PerformanceMetric {
     IndexTimePer100FilesMs,
     CapsuleLatencyP95Ms,
     ReindexTimeMs,
+    SetupTimeMs,
 }
 
 impl Default for Thresholds {
@@ -112,6 +113,7 @@ impl PerformanceThresholds {
             }
             PerformanceMetric::CapsuleLatencyP95Ms => value <= self.max_capsule_latency_p95_ms,
             PerformanceMetric::ReindexTimeMs => value <= self.max_reindex_time_ms,
+            PerformanceMetric::SetupTimeMs => true,
         }
     }
 }
