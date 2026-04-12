@@ -1828,6 +1828,7 @@ fn cmd_db(command: DbCommands) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn cmd_eval(
     suite: Option<String>,
     all: bool,
