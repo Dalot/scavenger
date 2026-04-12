@@ -5,7 +5,7 @@ use crate::db::schema;
 use crate::eval::CaseResult;
 use crate::eval::corpus::CorpusEntry;
 use crate::eval::thresholds::{PerformanceMetric, RelevanceMetric, Thresholds};
-use crate::graph::GraphState;
+use crate::graph::{self, GraphState};
 use crate::query::QueryResult;
 use crate::query::intent::{IntentResult, classify};
 use rusqlite::Connection;
@@ -66,7 +66,7 @@ fn run_single_relevance_case(
     corpus: &[CorpusEntry],
     thresholds: &Thresholds,
 ) -> Result<CaseResult, String> {
-    let _corpus_entry = corpus
+    let corpus_entry = corpus
         .iter()
         .find(|e| e.name == case.corpus)
         .ok_or_else(|| format!("Corpus '{}' not found", case.corpus))?;
@@ -74,7 +74,12 @@ fn run_single_relevance_case(
     let conn = Connection::open_in_memory().map_err(|e| e.to_string())?;
     schema::ensure_branch_schema(&conn).map_err(|e| e.to_string())?;
 
-    let graph = GraphState::new();
+    let mut graph = GraphState::new();
+    let source_files = graph::index::collect_source_files(&corpus_entry.path);
+    graph::index::bulk_index(&conn, &mut graph, &source_files)
+        .map_err(|e| format!("Failed to index corpus: {}", e))?;
+    graph.load_from_db(&conn).map_err(|e| e.to_string())?;
+
     let config = Config::default();
     let intent = classify(&case.query);
     let qr = QueryResult {
