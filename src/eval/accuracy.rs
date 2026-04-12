@@ -22,13 +22,17 @@ struct AccuracyCases {
 }
 
 pub fn run_accuracy_eval(
-    _corpus: &[CorpusEntry],
+    corpus: &[CorpusEntry],
     thresholds: &Thresholds,
 ) -> Result<Vec<CaseResult>, String> {
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap_or_else(|_| ".".to_string());
     let cases_dir = Path::new(&manifest_dir).join("eval/cases/accuracy");
 
     if !cases_dir.exists() {
+        return Ok(Vec::new());
+    }
+
+    if corpus.is_empty() {
         return Ok(Vec::new());
     }
 
@@ -46,6 +50,10 @@ pub fn run_accuracy_eval(
             toml::from_str(&content).map_err(|e| format!("Invalid TOML in {:?}: {}", path, e))?;
 
         for case in &cases.cases {
+            let _ = corpus
+                .iter()
+                .find(|e| e.name == case.corpus)
+                .ok_or_else(|| format!("Corpus '{}' not found", case.corpus))?;
             let result = run_single_accuracy_case(case, thresholds)?;
             all_results.push(result);
         }
