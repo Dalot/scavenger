@@ -53,3 +53,15 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - uses: EmbarkStudios/cargo-deny-action@v2
+
+  eval:
+    name: Eval (Tier 1)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Run evals
+        run: cargo run -- eval --tier component
+      - name: Run benchmarks
+        run: cargo bench -- --noplot
