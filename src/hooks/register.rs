@@ -20,6 +20,7 @@ pub enum AgentType {
 }
 
 impl AgentType {
+    #[allow(clippy::should_implement_trait, dead_code)]
     pub fn from_str(s: &str) -> Option<Self> {
         match s.to_lowercase().as_str() {
             "claude" => Some(AgentType::Claude),
@@ -320,10 +321,10 @@ pub fn register_mcp_via_cli(project_root: &Path) -> Result<bool, PluginError> {
             .stderr(std::process::Stdio::null())
             .status();
 
-        if let Ok(s) = result {
-            if s.success() {
-                return Ok(true);
-            }
+        if let Ok(s) = result
+            && s.success()
+        {
+            return Ok(true);
         }
     }
     Ok(false)
@@ -340,10 +341,10 @@ pub fn remove_mcp_via_cli(project_root: &Path) -> Result<bool, PluginError> {
             .stderr(std::process::Stdio::null())
             .status();
 
-        if let Ok(s) = result {
-            if s.success() {
-                return Ok(true);
-            }
+        if let Ok(s) = result
+            && s.success()
+        {
+            return Ok(true);
         }
     }
     Ok(false)

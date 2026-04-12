@@ -19,12 +19,11 @@ pub fn load_tasks(tasks_dir: &Path, pattern: Option<&str>) -> Result<Vec<AgentTa
             continue;
         }
 
-        if let Some(pat) = pattern {
-            if let Some(name) = path.file_stem().and_then(|s| s.to_str()) {
-                if !glob_match(pat, name) {
-                    continue;
-                }
-            }
+        if let Some(pat) = pattern
+            && let Some(name) = path.file_stem().and_then(|s| s.to_str())
+            && !glob_match(pat, name)
+        {
+            continue;
         }
 
         let content = fs::read_to_string(&path).map_err(|e| e.to_string())?;

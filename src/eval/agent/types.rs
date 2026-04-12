@@ -31,11 +31,13 @@ pub struct AgentRunMetrics {
 }
 
 #[derive(Debug, Clone, Serialize)]
+#[allow(dead_code)]
 pub struct TokenUsage {
     pub tokens_used: u64,
 }
 
 #[derive(Debug, Clone, Serialize)]
+#[allow(dead_code)]
 pub struct AgentResult {
     pub task_name: String,
     pub success: bool,
@@ -52,6 +54,7 @@ pub enum AgentType {
 }
 
 impl AgentType {
+    #[allow(dead_code)]
     pub fn from_str(s: &str) -> Option<Self> {
         match s.to_lowercase().as_str() {
             "claude" => Some(AgentType::Claude),
@@ -61,6 +64,7 @@ impl AgentType {
         }
     }
 
+    #[allow(dead_code)]
     pub fn cli_name(&self) -> &'static str {
         match self {
             AgentType::Claude => "claude",
