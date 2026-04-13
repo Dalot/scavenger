@@ -1,0 +1,75 @@
+# G2 (Structural/Import-Chain) Test Cases
+# These cases require import chain tracing (1-2 hops)
+# BM25 alone should fail because query doesn't contain symbol names
+
+[[case]]
+name = "g2-callers-of-parse_config"
+category = "g2_structural"
+query = "who calls parse_config"
+expected_symbols = ["main", "parse_config"]
+expected_files = ["src/main.rs", "src/config.rs"]
+detail_level = "standard"
+
+[case.assert]
+bm25_should_find = false
+graph_should_find = true
+
+[[case]]
+name = "g2-callees-from-main"
+category = "g2_structural"
+query = "what does main function call"
+expected_symbols = ["parse_config", "validate_config"]
+expected_files = ["src/main.rs", "src/config.rs"]
+detail_level = "standard"
+
+[case.assert]
+bm25_should_find = false
+graph_should_find = true
+
+[[case]]
+name = "g2-http-middleware-chain"
+category = "g2_structural"
+query = "what does handle_request depend on"
+expected_symbols = ["process_request"]
+expected_files = ["src/http.rs", "src/middleware/logging.rs"]
+detail_level = "standard"
+
+[case.assert]
+bm25_should_find = false
+graph_should_find = true
+
+[[case]]
+name = "g2-utils-used-by-config"
+category = "g2_structural"
+query = "what imports utils module"
+expected_symbols = ["config"]
+expected_files = ["src/config.rs"]
+detail_level = "standard"
+
+[case.assert]
+bm25_should_find = false
+graph_should_find = true
+
+[[case]]
+name = "g2-middleware-exports"
+category = "g2_structural"
+query = "what is exported from middleware module"
+expected_symbols = ["LoggingMiddleware"]
+expected_files = ["src/middleware/mod.rs", "src/middleware/logging.rs"]
+detail_level = "standard"
+
+[case.assert]
+bm25_should_find = false
+graph_should_find = true
+
+[[case]]
+name = "g2-config-dependencies"
+category = "g2_structural"
+query = "where is Config used"
+expected_symbols = ["HttpServer", "main"]
+expected_files = ["src/http.rs", "src/main.rs"]
+detail_level = "standard"
+
+[case.assert]
+bm25_should_find = false
+graph_should_find = true

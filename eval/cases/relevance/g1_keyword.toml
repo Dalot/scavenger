@@ -1,0 +1,86 @@
+# G1 (Keyword-Findable) Test Cases
+# These cases should be found by BM25 alone because queries contain exact symbol names
+
+[[case]]
+name = "g1-find-parse_config"
+category = "g1_keyword"
+query = "parse_config function"
+expected_symbols = ["parse_config"]
+expected_files = ["src/config.rs"]
+detail_level = "standard"
+
+[case.assert]
+bm25_should_find = true
+graph_should_find = true
+
+[[case]]
+name = "g1-find-parse_input"
+category = "g1_keyword"
+query = "parse_input"
+expected_symbols = ["parse_input"]
+expected_files = ["src/utils.rs"]
+detail_level = "standard"
+
+[case.assert]
+bm25_should_find = true
+graph_should_find = true
+
+[[case]]
+name = "g1-find-validate_email"
+category = "g1_keyword"
+query = "validate_email"
+expected_symbols = ["validate_email"]
+expected_files = ["src/utils.rs"]
+detail_level = "standard"
+
+[case.assert]
+bm25_should_find = true
+graph_should_find = true
+
+[[case]]
+name = "g1-find-DataProcessor"
+category = "g1_keyword"
+query = "DataProcessor struct"
+expected_symbols = ["DataProcessor"]
+expected_files = ["src/utils.rs"]
+detail_level = "standard"
+
+[case.assert]
+bm25_should_find = true
+graph_should_find = true
+
+[[case]]
+name = "g1-find-HttpServer"
+category = "g1_keyword"
+query = "HttpServer"
+expected_symbols = ["HttpServer"]
+expected_files = ["src/http.rs"]
+detail_level = "standard"
+
+[case.assert]
+bm25_should_find = true
+graph_should_find = true
+
+[[case]]
+name = "g1-find-LoggingMiddleware"
+category = "g1_keyword"
+query = "LoggingMiddleware"
+expected_symbols = ["LoggingMiddleware"]
+expected_files = ["src/middleware/logging.rs"]
+detail_level = "standard"
+
+[case.assert]
+bm25_should_find = true
+graph_should_find = true
+
+[[case]]
+name = "g1-find-log_message"
+category = "g1_keyword"
+query = "log_message"
+expected_symbols = ["log_message"]
+expected_files = ["src/logger.rs"]
+detail_level = "standard"
+
+[case.assert]
+bm25_should_find = true
+graph_should_find = true

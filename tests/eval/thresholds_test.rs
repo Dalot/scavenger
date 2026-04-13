@@ -47,6 +47,8 @@ fn test_load_thresholds_custom_values() {
 [relevance]
 min_recall = 0.95
 min_precision = 0.85
+min_correct_rate = 0.90
+max_incorrect_rate = 0.05
 
 [accuracy]
 min_intent_accuracy = 0.99

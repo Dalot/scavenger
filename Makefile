@@ -59,3 +59,21 @@ clean:
 
 # Full rebuild: clean + build release
 rebuild: clean build
+
+# Run evaluation suites
+.PHONY: eval eval-json eval-ci bench
+
+eval:
+	cargo run -- eval --tier component
+
+eval-json:
+	cargo run -- eval --tier component --json
+
+eval-ci:
+	@echo "Running component-tier evaluation..."
+	@mkdir -p eval/results
+	@cargo run --release -- eval --tier component --json > eval/results/ci-results.json
+	@echo "Eval complete. Results saved to eval/results/ci-results.json"
+
+bench:
+	cargo bench

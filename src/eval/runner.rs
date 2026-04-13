@@ -1,7 +1,7 @@
 use crate::eval::agent::types::AgentType;
 use crate::eval::corpus::{CorpusEntry, load_corpus};
 use crate::eval::reporter::{print_json, print_summary, run_suite};
-use crate::eval::{CaseResult, EvalRun, EvalTier};
+use crate::eval::{CaseResult, Correctness, EvalRun, EvalTier};
 use std::path::{Path, PathBuf};
 
 fn load_corpus_directory(root: &Path) -> Result<Vec<CorpusEntry>, String> {
@@ -216,16 +216,24 @@ fn run_agent_suite(
 
             CaseResult {
                 case_name: r.task_name.clone(),
+                category: "agent".to_string(),
                 metrics: std::collections::HashMap::from([(
                     "token_delta".to_string(),
                     token_delta,
                 )]),
+                correctness: if r.success {
+                    Correctness::Correct
+                } else {
+                    Correctness::Incorrect
+                },
                 passed: r.success,
                 failure_reason: if r.success {
                     None
                 } else {
                     Some(r.success_details.join("; "))
                 },
+                bm25_recall: 0.0,
+                graph_recall: if r.success { 1.0 } else { 0.0 },
             }
         })
         .collect();

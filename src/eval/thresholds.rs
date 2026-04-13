@@ -7,6 +7,8 @@ use std::path::Path;
 pub struct RelevanceThresholds {
     pub min_recall: f64,
     pub min_precision: f64,
+    pub min_correct_rate: f64,
+    pub max_incorrect_rate: f64,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -69,6 +71,8 @@ impl Default for Thresholds {
             relevance: RelevanceThresholds {
                 min_recall: 0.80,
                 min_precision: 0.60,
+                min_correct_rate: 0.70,
+                max_incorrect_rate: 0.10,
             },
             accuracy: AccuracyThresholds {
                 min_intent_accuracy: 0.90,
