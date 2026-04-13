@@ -12,6 +12,8 @@ mod query;
 use clap::{Parser, Subcommand};
 use owo_colors::OwoColorize;
 use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 #[derive(Parser)]
 #[command(
@@ -499,6 +501,15 @@ fn cmd_init() -> Result<(), Box<dyn std::error::Error>> {
     let conn = db::open_branch_db(&scavenger_dir, &branch)?;
     let _meta_conn = db::open_daemon_meta_db(&scavenger_dir)?;
 
+    // Setup Ctrl+C signal handling for graceful shutdown
+    let shutdown = Arc::new(AtomicBool::new(false));
+    let shutdown_clone = shutdown.clone();
+    let rt = tokio::runtime::Runtime::new()?;
+    rt.spawn(async move {
+        let _ = tokio::signal::ctrl_c().await;
+        shutdown_clone.store(true, Ordering::SeqCst);
+    });
+
     // Step 3: Bulk index all source files
     let source_files = graph::index::collect_source_files(&project_root);
     eprintln!(
@@ -524,6 +535,11 @@ fn cmd_init() -> Result<(), Box<dyn std::error::Error>> {
         );
         let mut doc_chunks = 0u32;
         for doc_path in &doc_files {
+            // Check for shutdown signal periodically during doc indexing
+            if shutdown.load(Ordering::SeqCst) {
+                eprintln!("\nInterrupted, stopping...");
+                return Ok(());
+            }
             if let Ok(content) = std::fs::read_to_string(doc_path) {
                 let rel = doc_path.to_string_lossy().to_string();
                 if let Ok(count) = graph::doc_indexer::index_doc_file(&conn, &rel, &content) {
