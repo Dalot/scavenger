@@ -1,4 +1,4 @@
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 
@@ -8,9 +8,11 @@ pub enum ConfigError {
     Io(#[from] std::io::Error),
     #[error("failed to parse config: {0}")]
     Parse(#[from] toml::de::Error),
+    #[error("failed to extract config: {0}")]
+    Figment(#[from] Box<figment::Error>),
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(default)]
 pub struct Config {
     pub budget: BudgetConfig,
@@ -19,16 +21,17 @@ pub struct Config {
     pub docs: DocsConfig,
     pub analytics: AnalyticsConfig,
     pub federation: FederationConfig,
+    pub log_level: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(untagged)]
 pub enum ScopeValue {
     Single(String),
     Multiple(Vec<String>),
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(default)]
 pub struct BudgetConfig {
     pub default: u32,
@@ -44,7 +47,7 @@ impl Default for BudgetConfig {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(default)]
 pub struct TraversalConfig {
     pub degree_cap: u32,
@@ -62,7 +65,7 @@ impl Default for TraversalConfig {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(default)]
 pub struct DocsConfig {
     pub enabled: bool,
@@ -82,7 +85,7 @@ impl Default for DocsConfig {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(default)]
 pub struct AnalyticsConfig {
     pub enabled: bool,
@@ -100,7 +103,7 @@ impl Default for AnalyticsConfig {
     }
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(default)]
 pub struct FederationConfig {
     pub repos: Vec<PathBuf>,
@@ -108,15 +111,23 @@ pub struct FederationConfig {
 
 impl Config {
     /// Load config from `.scavenger.toml` in the given project root.
-    /// Returns defaults if the file doesn't exist.
+    /// Supports layered configuration: defaults < config file < environment variables.
     pub fn load(project_root: &Path) -> Result<Self, ConfigError> {
-        let config_path = project_root.join(".scavenger.toml");
-        if !config_path.exists() {
-            return Ok(Self::default());
-        }
+        use figment::{
+            Figment,
+            providers::{Env, Format, Serialized, Toml},
+        };
 
-        let content = std::fs::read_to_string(&config_path)?;
-        let mut config: Config = toml::from_str(&content)?;
+        let config_path = project_root.join(".scavenger.toml");
+
+        let figment = Figment::new()
+            .merge(Serialized::defaults(Config::default()))
+            .merge(Toml::file(config_path))
+            .merge(Env::prefixed("SCAVENGER_").split("__"));
+
+        let mut config: Config = figment
+            .extract()
+            .map_err(|e| ConfigError::Figment(Box::new(e)))?;
         config.clamp_and_warn();
         Ok(config)
     }
