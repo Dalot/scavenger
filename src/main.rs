@@ -736,7 +736,7 @@ fn cmd_capsule(
     let result = capsule::assemble(&conn, &g, &cfg, &qr, budget, &constraints);
 
     println!("{}", result.text);
-    eprintln!(
+    println!(
         "({} tokens, {} items)",
         result.token_count, result.items_included
     );
