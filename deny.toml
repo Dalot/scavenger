@@ -9,6 +9,9 @@ ignore = [
     # paste is unmaintained, but it's a transitive dep from ratatui.
     # No safe upgrade path until ratatui drops it upstream.
     { id = "RUSTSEC-2024-0436", reason = "transitive dep from ratatui, no upgrade available" },
+    # number_prefix is unmaintained, but it's a transitive dep from indicatif.
+    # No safe upgrade path until indicatif switches to unit-prefix.
+    { id = "RUSTSEC-2025-0119", reason = "transitive dep from indicatif, no upgrade available" },
 ]
 
 [licenses]
