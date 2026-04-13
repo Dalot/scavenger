@@ -11,7 +11,7 @@ pub(crate) mod thresholds;
 pub use accuracy::run_accuracy_eval;
 pub use case::{CaseAssert, CaseCategory, EvalCase, load_cases};
 pub use corpus::{CorpusEntry, load_corpus};
-pub use coverage::{calculate_acs, first_correct_position, ContextMetrics};
+pub use coverage::{ContextMetrics, calculate_acs, first_correct_position};
 pub use relevance::{run_performance_checks, run_relevance_eval};
 pub use reporter::{print_json, print_summary, run_suite};
 pub use runner::{EvalOptions, EvalSuite, run_evals};
