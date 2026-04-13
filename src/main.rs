@@ -10,6 +10,7 @@ mod observe;
 mod query;
 
 use clap::{Parser, Subcommand};
+use indicatif::{ProgressBar, ProgressStyle};
 use owo_colors::OwoColorize;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -512,27 +513,33 @@ fn cmd_init() -> Result<(), Box<dyn std::error::Error>> {
 
     // Step 3: Bulk index all source files
     let source_files = graph::index::collect_source_files(&project_root);
-    eprintln!(
-        "  Indexing {} source files...",
-        source_files.len().to_string().cyan()
+    let pb = ProgressBar::new(source_files.len() as u64);
+    pb.set_style(
+        ProgressStyle::default_bar()
+            .template("  {spinner:.green} [{bar:40.cyan/blue}] {pos}/{len} {msg}")
+            .unwrap()
+            .progress_chars("#>-"),
     );
+    pb.set_message("Indexing source files...");
     let mut graph_state = graph::GraphState::new();
     let stats = graph::index::bulk_index(&conn, &mut graph_state, &source_files)?;
-    eprintln!(
-        "  Indexed: {} files, {} symbols, {} edges",
-        stats.files_indexed.to_string().green(),
-        stats.symbols_extracted.to_string().green(),
-        stats.edges_created.to_string().green(),
-    );
+    pb.finish_with_message(format!(
+        "Indexed {} files, {} symbols, {} edges",
+        stats.files_indexed, stats.symbols_extracted, stats.edges_created
+    ));
 
     // Step 4: Index doc files
     let doc_files =
         graph::doc_indexer::collect_doc_files(&project_root, &cfg.docs.patterns, &cfg.docs.exclude);
     if !doc_files.is_empty() {
-        eprintln!(
-            "  Indexing {} doc files...",
-            doc_files.len().to_string().cyan()
+        let pb = ProgressBar::new(doc_files.len() as u64);
+        pb.set_style(
+            ProgressStyle::default_bar()
+                .template("  {spinner:.green} [{bar:40.cyan/blue}] {pos}/{len} {msg}")
+                .unwrap()
+                .progress_chars("#>-"),
         );
+        pb.set_message("Indexing doc files...");
         let mut doc_chunks = 0u32;
         for doc_path in &doc_files {
             // Check for shutdown signal periodically during doc indexing
@@ -546,8 +553,9 @@ fn cmd_init() -> Result<(), Box<dyn std::error::Error>> {
                     doc_chunks += count;
                 }
             }
+            pb.inc(1);
         }
-        eprintln!("  Doc chunks: {}", doc_chunks.to_string().green());
+        pb.finish_with_message(format!("Indexed {} doc chunks", doc_chunks));
     }
 
     // Step 5: Create Claude Code plugin
@@ -684,19 +692,23 @@ fn cmd_index(path: Option<PathBuf>) -> Result<(), Box<dyn std::error::Error>> {
     let conn = db::open_branch_db(&scavenger_dir, &branch)?;
 
     let source_files = graph::index::collect_source_files(&project_root);
-    eprintln!(
-        "Re-indexing {} files on branch {branch}...",
-        source_files.len()
+    let pb = ProgressBar::new(source_files.len() as u64);
+    pb.set_style(
+        ProgressStyle::default_bar()
+            .template("{spinner:.green} [{bar:40.cyan/blue}] {pos}/{len} {msg}")
+            .unwrap()
+            .progress_chars("#>-"),
     );
+    pb.set_message(format!("Re-indexing files on branch {branch}..."));
 
     let mut g = graph::GraphState::new();
     g.load_from_db(&conn)?;
     let stats = graph::index::bulk_index(&conn, &mut g, &source_files)?;
 
-    eprintln!(
+    pb.finish_with_message(format!(
         "Indexed: {} files, {} symbols, {} edges",
         stats.files_indexed, stats.symbols_extracted, stats.edges_created
-    );
+    ));
     Ok(())
 }
 
