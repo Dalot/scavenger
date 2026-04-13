@@ -273,6 +273,13 @@ fn run_single_relevance_case(
                         recall
                     ));
                 }
+                if assert.bm25_should_find && bm25_recall < 0.5 {
+                    passed = false;
+                    failure_reason = Some(format!(
+                        "G1 case expected BM25 to find symbols but recall was {:.2}",
+                        bm25_recall
+                    ));
+                }
             }
             CaseCategory::G2Structural | CaseCategory::G3Hidden => {
                 if assert.graph_should_find && recall < 0.5 {
@@ -285,6 +292,13 @@ fn run_single_relevance_case(
                             3
                         },
                         recall
+                    ));
+                }
+                if assert.bm25_should_find && bm25_recall >= 0.5 {
+                    passed = false;
+                    failure_reason = Some(format!(
+                        "G2/G3 case expected BM25 to fail but recall was {:.2}",
+                        bm25_recall
                     ));
                 }
             }
@@ -313,7 +327,7 @@ fn compute_bm25_baseline(
     query: &str,
     expected_symbols: &[String],
 ) -> HashSet<String> {
-    let search_results = search::search(conn, graph, query, 50).unwrap_or_default();
+    let search_results = search::search_bm25_only(conn, query, 50).unwrap_or_default();
     let expected_set: HashSet<String> = expected_symbols.iter().cloned().collect();
     let mut found = HashSet::new();
 

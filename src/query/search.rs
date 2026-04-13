@@ -94,6 +94,43 @@ pub fn search(
     Ok(results)
 }
 
+/// Search nodes via FTS5 BM25 only, without graph centrality weighting.
+///
+/// This returns results sorted purely by BM25 score, suitable for baseline
+/// comparison to measure the added value of graph-based traversal.
+pub fn search_bm25_only(conn: &Connection, query: &str, limit: u32) -> DbResult<Vec<SearchResult>> {
+    if query.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let sanitized = sanitize_fts_query(query);
+    if sanitized.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let mut stmt = conn.prepare(
+        "SELECT n.id, bm25(nodes_fts) AS bm25_score
+         FROM nodes_fts
+         JOIN nodes n ON nodes_fts.rowid = n._rowid
+         WHERE nodes_fts MATCH ?1
+         ORDER BY bm25(nodes_fts)
+         LIMIT ?2",
+    )?;
+
+    let results: Vec<SearchResult> = stmt
+        .query_map(rusqlite::params![sanitized, limit], |row| {
+            Ok(SearchResult {
+                node_id: NodeId(row.get(0)?),
+                bm25_score: row.get(1)?,
+                centrality: 0.0,
+                combined_score: 0.0,
+            })
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+
+    Ok(results)
+}
+
 /// Sanitize a query for FTS5 MATCH: strip special characters that break FTS5 syntax.
 fn sanitize_fts_query(query: &str) -> String {
     let mut out = String::with_capacity(query.len());
