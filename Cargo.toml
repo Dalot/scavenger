@@ -95,7 +95,7 @@ tracing-appender = "0.2"
 uuid = { version = "1", features = ["v4"] }
 chrono = "0.4"
 thiserror = "2"
-libc = "0.2.184"
+libc = "0.2.185"
 
 # OpenTelemetry (behind feature flag)
 opentelemetry = { version = "0.31", optional = true }
