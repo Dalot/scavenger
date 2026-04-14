@@ -130,7 +130,7 @@ pub fn extract_symbols_from_capsule(capsule_text: &str) -> HashSet<String> {
         // Match struct definitions: "struct Name" or "pub struct Name"
         if let Some(cap) = extract_after_keyword(line, "struct ") {
             let name = cap
-                .split(|c: char| c == '{' || c == '<' || c == ' ')
+                .split(|c: char| c == '{' || c == '<' || c == ' ' || c == ';')
                 .next()
                 .unwrap_or("");
             if !name.is_empty() {
@@ -141,7 +141,7 @@ pub fn extract_symbols_from_capsule(capsule_text: &str) -> HashSet<String> {
         // Match enum definitions: "enum Name" or "pub enum Name"
         if let Some(cap) = extract_after_keyword(line, "enum ") {
             let name = cap
-                .split(|c: char| c == '{' || c == ' ')
+                .split(|c: char| c == '{' || c == ' ' || c == ';')
                 .next()
                 .unwrap_or("");
             if !name.is_empty() {
@@ -266,6 +266,7 @@ fn run_single_relevance_case(
     let mut failure_reason = None;
 
     let capsule_symbols = extract_symbols_from_capsule(&capsule.text);
+
     let expected: HashSet<String> = case.expected_symbols.iter().cloned().collect();
     let expected_set_for_fctc: HashSet<String> = case.expected_symbols.iter().cloned().collect();
 
@@ -471,6 +472,30 @@ impl HttpServer {
         let symbols = extract_symbols_from_capsule(capsule);
         assert!(symbols.contains("parse_config"));
         assert!(symbols.contains("HttpServer"));
+    }
+
+    #[test]
+    fn test_extract_unit_struct() {
+        let capsule = r#"
+pub struct DataProcessor;
+"#;
+        let symbols = extract_symbols_from_capsule(capsule);
+        assert!(
+            symbols.contains("DataProcessor"),
+            "Should extract DataProcessor without semicolon"
+        );
+    }
+
+    #[test]
+    fn test_extract_unit_enum() {
+        let capsule = r#"
+pub enum Status;
+"#;
+        let symbols = extract_symbols_from_capsule(capsule);
+        assert!(
+            symbols.contains("Status"),
+            "Should extract Status without semicolon"
+        );
     }
 
     #[test]
