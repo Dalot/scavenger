@@ -1,0 +1,7 @@
+{"name": "g1-find-parse_config", "category": "g1_keyword", "query": "parse_config function", "expected": ["parse_config"], "files": ["src/config.rs"], "detail": "standard", "assert": {"bm25": true, "graph": true}}
+{"name": "g1-find-parse_input", "category": "g1_keyword", "query": "parse_input", "expected": ["parse_input"], "files": ["src/utils.rs"], "detail": "standard", "assert": {"bm25": true, "graph": true}}
+{"name": "g1-find-validate_email", "category": "g1_keyword", "query": "validate_email", "expected": ["validate_email"], "files": ["src/utils.rs"], "detail": "standard", "assert": {"bm25": true, "graph": true}}
+{"name": "g1-find-DataProcessor", "category": "g1_keyword", "query": "DataProcessor struct", "expected": ["DataProcessor"], "files": ["src/utils.rs"], "detail": "standard", "assert": {"bm25": true, "graph": true}}
+{"name": "g1-find-HttpServer", "category": "g1_keyword", "query": "HttpServer", "expected": ["HttpServer"], "files": ["src/http.rs"], "detail": "standard", "assert": {"bm25": true, "graph": true}}
+{"name": "g1-find-LoggingMiddleware", "category": "g1_keyword", "query": "LoggingMiddleware", "expected": ["LoggingMiddleware"], "files": ["src/middleware/logging.rs"], "detail": "standard", "assert": {"bm25": true, "graph": true}}
+{"name": "g1-find-log_message", "category": "g1_keyword", "query": "log_message", "expected": ["log_message"], "files": ["src/logger.rs"], "detail": "standard", "assert": {"bm25": true, "graph": true}}

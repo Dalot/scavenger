@@ -9,7 +9,7 @@ pub(crate) mod runner;
 pub(crate) mod thresholds;
 
 pub use accuracy::run_accuracy_eval;
-pub use case::{CaseAssert, CaseCategory, EvalCase, load_cases};
+pub use case::{CaseAssert, CaseCategory, OwnedEvalCase, load_cases};
 pub use corpus::{CorpusEntry, load_corpus};
 pub use coverage::{ContextMetrics, calculate_acs, first_correct_position};
 pub use relevance::{run_performance_checks, run_relevance_eval};
@@ -57,8 +57,8 @@ pub enum EvalError {
     CorpusNotFound(std::path::PathBuf),
     #[error("cannot read directory {0}: {1}")]
     ReadError(std::path::PathBuf, std::io::Error),
-    #[error("invalid TOML in {0}: {1}")]
-    ParseError(std::path::PathBuf, toml::de::Error),
+    #[error("invalid case format in {0}: {1}")]
+    ParseError(std::path::PathBuf, Box<dyn std::error::Error + Send + Sync>),
 }
 
 pub type EvalResult<T> = Result<T, EvalError>;

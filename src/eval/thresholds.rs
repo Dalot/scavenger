@@ -129,7 +129,7 @@ pub fn load_thresholds(path: &Path) -> EvalResult<Thresholds> {
 
     let content =
         fs::read_to_string(path).map_err(|e| EvalError::ReadError(path.to_path_buf(), e))?;
-    let thresholds: Thresholds =
-        toml::from_str(&content).map_err(|e| EvalError::ParseError(path.to_path_buf(), e))?;
+    let thresholds: Thresholds = toml::from_str(&content)
+        .map_err(|e| EvalError::ParseError(path.to_path_buf(), Box::new(e)))?;
     Ok(thresholds)
 }

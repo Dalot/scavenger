@@ -7,7 +7,7 @@ use crate::capsule::assemble;
 use crate::capsule::budget::{CapsuleConstraints, DetailLevel};
 use crate::config::Config;
 use crate::db::schema;
-use crate::eval::case::{CaseCategory, EvalCase, load_cases};
+use crate::eval::case::{CaseCategory, OwnedEvalCase, load_cases};
 use crate::eval::corpus::CorpusEntry;
 use crate::eval::coverage::{ContextMetrics, calculate_acs, first_correct_position};
 use crate::eval::thresholds::{PerformanceMetric, RelevanceMetric, Thresholds};
@@ -160,7 +160,7 @@ fn extract_after_keyword<'a>(line: &'a str, keyword: &str) -> Option<&'a str> {
 /// BM25 search, neighbor collection) then assembles a capsule and extracts
 /// symbols to compute recall/precision/correctness.
 fn run_single_relevance_case(
-    case: &EvalCase,
+    case: &OwnedEvalCase,
     corpus: &[CorpusEntry],
     thresholds: &Thresholds,
 ) -> Result<CaseResult, String> {
@@ -266,14 +266,14 @@ fn run_single_relevance_case(
 
         match category {
             CaseCategory::G1Keyword => {
-                if assert.graph_should_find && recall < 0.5 {
+                if assert.graph && recall < 0.5 {
                     passed = false;
                     failure_reason = Some(format!(
                         "G1 case expected graph to find symbols but recall was {:.2}",
                         recall
                     ));
                 }
-                if assert.bm25_should_find && bm25_recall < 0.5 {
+                if assert.bm25 && bm25_recall < 0.5 {
                     passed = false;
                     failure_reason = Some(format!(
                         "G1 case expected BM25 to find symbols but recall was {:.2}",
@@ -282,7 +282,7 @@ fn run_single_relevance_case(
                 }
             }
             CaseCategory::G2Structural | CaseCategory::G3Hidden => {
-                if assert.graph_should_find && recall < 0.5 {
+                if assert.graph && recall < 0.5 {
                     passed = false;
                     failure_reason = Some(format!(
                         "G{}/G3 case expected graph to find symbols but recall was {:.2}",
@@ -294,7 +294,7 @@ fn run_single_relevance_case(
                         recall
                     ));
                 }
-                if assert.bm25_should_find && bm25_recall >= 0.5 {
+                if assert.bm25 && bm25_recall >= 0.5 {
                     passed = false;
                     failure_reason = Some(format!(
                         "G2/G3 case expected BM25 to fail but recall was {:.2}",
