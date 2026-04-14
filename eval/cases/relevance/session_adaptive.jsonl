@@ -1,5 +1,0 @@
-{"name": "adaptive-minimal-still-useful", "category": "g1_keyword", "query": "parse_config", "expected": ["parse_config"], "detail": "minimal", "assert": {"bm25": true, "graph": true}}
-{"name": "adaptive-standard-graceful", "category": "g2_structural", "query": "who calls parse_config", "expected": ["main", "parse_config"], "detail": "standard", "assert": {"bm25": false, "graph": true}}
-{"name": "adaptive-budget-512", "category": "g1_keyword", "query": "parse_config", "expected": ["parse_config"], "detail": "standard", "budget": 512, "assert": {"bm25": true, "graph": true}}
-{"name": "adaptive-budget-1024", "category": "g2_structural", "query": "who calls parse_config", "expected": ["main"], "detail": "standard", "budget": 1024, "assert": {"bm25": false, "graph": true}}
-{"name": "adaptive-never-empty", "category": "g1_keyword", "query": "parse_config", "expected": ["parse_config"], "detail": "standard", "budget": 256, "assert": {"bm25": true, "graph": true}}

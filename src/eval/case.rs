@@ -104,7 +104,7 @@ pub struct CaseAssert {
     pub graph: bool,
 }
 
-/// Load all JSON Lines case files from a directory
+/// Load all JSON case files from a directory
 pub fn load_cases(dir: &Path) -> EvalResult<Vec<OwnedEvalCase>> {
     if !dir.exists() {
         return Ok(Vec::new());
@@ -115,21 +115,33 @@ pub fn load_cases(dir: &Path) -> EvalResult<Vec<OwnedEvalCase>> {
     for entry in fs::read_dir(dir).map_err(|e| EvalError::ReadError(dir.to_path_buf(), e))? {
         let entry = entry.map_err(|e| EvalError::ReadError(dir.to_path_buf(), e))?;
         let path = entry.path();
-        if path.extension().and_then(|e| e.to_str()) != Some("jsonl") {
+        if !matches!(
+            path.extension().and_then(|e| e.to_str()),
+            Some("json") | Some("jsonl")
+        ) {
             continue;
         }
 
         let content =
             fs::read_to_string(&path).map_err(|e| EvalError::ReadError(path.clone(), e))?;
 
-        for line in content.lines() {
-            let trimmed = line.trim();
-            if trimmed.is_empty() {
-                continue;
-            }
-            let case: EvalCase = serde_json::from_str(trimmed)
+        // Try JSON array first, then JSON Lines
+        if content.trim().starts_with('[') {
+            let cases: Vec<EvalCase> = serde_json::from_str(&content)
                 .map_err(|e| EvalError::ParseError(path.clone(), Box::new(e)))?;
-            all_cases.push(case.to_owned());
+            for case in cases {
+                all_cases.push(case.to_owned());
+            }
+        } else {
+            for line in content.lines() {
+                let trimmed = line.trim();
+                if trimmed.is_empty() || !trimmed.starts_with('{') {
+                    continue;
+                }
+                let case: EvalCase = serde_json::from_str(trimmed)
+                    .map_err(|e| EvalError::ParseError(path.clone(), Box::new(e)))?;
+                all_cases.push(case.to_owned());
+            }
         }
     }
 

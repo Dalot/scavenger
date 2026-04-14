@@ -1,0 +1,77 @@
+[
+  {
+    "name": "budget-minimal-g2-callers",
+    "category": "g2_structural",
+    "query": "who calls parse_config",
+    "expected": ["main"],
+    "detail": "minimal",
+    "assert": {"bm25": false, "graph": true}
+  },
+  {
+    "name": "budget-minimal-g1-keyword",
+    "category": "g1_keyword",
+    "query": "parse_input",
+    "expected": ["parse_input"],
+    "detail": "minimal",
+    "assert": {"bm25": true, "graph": true}
+  },
+  {
+    "name": "budget-standard-g2-callers",
+    "category": "g2_structural",
+    "query": "who calls parse_config",
+    "expected": ["main", "parse_config"],
+    "detail": "standard",
+    "assert": {"bm25": false, "graph": true}
+  },
+  {
+    "name": "budget-standard-g1-keyword",
+    "category": "g1_keyword",
+    "query": "DataProcessor",
+    "expected": ["DataProcessor", "process"],
+    "detail": "standard",
+    "assert": {"bm25": true, "graph": true}
+  },
+  {
+    "name": "budget-detailed-g2-callers",
+    "category": "g2_structural",
+    "query": "what does main function call",
+    "expected": ["parse_config", "validate_config", "HttpServer::new"],
+    "detail": "detailed",
+    "assert": {"bm25": false, "graph": true}
+  },
+  {
+    "name": "budget-detailed-g3-chain",
+    "category": "g3_hidden",
+    "query": "all code responsible for request logging",
+    "expected": ["handle_request", "process_request", "log_message"],
+    "detail": "detailed",
+    "assert": {"bm25": false, "graph": true}
+  },
+  {
+    "name": "budget-explicit-1024",
+    "category": "g2_structural",
+    "query": "who calls parse_config",
+    "expected": ["main"],
+    "detail": "standard",
+    "budget": 1024,
+    "assert": {"bm25": false, "graph": true}
+  },
+  {
+    "name": "budget-explicit-2048",
+    "category": "g2_structural",
+    "query": "who calls parse_config",
+    "expected": ["main", "parse_config"],
+    "detail": "standard",
+    "budget": 2048,
+    "assert": {"bm25": false, "graph": true}
+  },
+  {
+    "name": "budget-explicit-4096",
+    "category": "g2_structural",
+    "query": "who calls parse_config",
+    "expected": ["main", "parse_config", "validate_config"],
+    "detail": "standard",
+    "budget": 4096,
+    "assert": {"bm25": false, "graph": true}
+  }
+]
