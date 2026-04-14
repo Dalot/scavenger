@@ -67,11 +67,52 @@ pub fn compute_metrics(
     (recall, precision, correctness)
 }
 
+/// Normalize multi-line Rust signatures to single line for extraction
+fn normalize_text(text: &str) -> String {
+    let mut result = String::new();
+    let mut brace_depth = 0;
+    let mut prev_was_newline = true;
+
+    for ch in text.chars() {
+        match ch {
+            '{' => {
+                brace_depth += 1;
+                result.push(ch);
+                prev_was_newline = false;
+            }
+            '}' => {
+                brace_depth -= 1;
+                result.push(ch);
+                prev_was_newline = false;
+            }
+            '\n' | '\r' => {
+                if brace_depth > 0 {
+                    if !prev_was_newline {
+                        result.push(' ');
+                    }
+                    prev_was_newline = true;
+                } else {
+                    result.push(ch);
+                    prev_was_newline = true;
+                }
+            }
+            _ => {
+                result.push(ch);
+                prev_was_newline = false;
+            }
+        }
+    }
+
+    result
+}
+
 /// Extract symbol names from capsule text using simple heuristics
 pub fn extract_symbols_from_capsule(capsule_text: &str) -> HashSet<String> {
     let mut symbols = HashSet::new();
 
-    for line in capsule_text.lines() {
+    let normalized = normalize_text(capsule_text);
+
+    for line in normalized.lines() {
         let line = line.trim();
 
         // Match function definitions: "fn name" or "pub fn name"
@@ -430,5 +471,34 @@ impl HttpServer {
         let symbols = extract_symbols_from_capsule(capsule);
         assert!(symbols.contains("parse_config"));
         assert!(symbols.contains("HttpServer"));
+    }
+
+    #[test]
+    fn test_extract_multiline_functions() {
+        let capsule = r#"
+pub fn parse_config() -> Config {
+    Config::new()
+}
+
+fn helper_with_long_body(
+    arg1: Type1,
+    arg2: Type2,
+) -> Result<Type3, Error> {
+    Ok(Type3)
+}
+
+struct MultiField {
+    field1: Type1,
+    field2: Type2,
+}
+"#;
+        let symbols = extract_symbols_from_capsule(capsule);
+        // These should be found but were missed before
+        assert!(symbols.contains("parse_config"), "Should find parse_config");
+        assert!(
+            symbols.contains("helper_with_long_body"),
+            "Should find helper_with_long_body"
+        );
+        assert!(symbols.contains("MultiField"), "Should find MultiField");
     }
 }
