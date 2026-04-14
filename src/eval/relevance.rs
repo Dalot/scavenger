@@ -366,20 +366,19 @@ fn run_single_relevance_case(
 fn compute_bm25_baseline(
     conn: &Connection,
     graph: &GraphState,
-    query: &str,
+    _query: &str,
     expected_symbols: &[String],
 ) -> HashSet<String> {
-    let search_results = search::search_bm25_only(conn, query, 50).unwrap_or_default();
-    let expected_set: HashSet<String> = expected_symbols.iter().cloned().collect();
     let mut found = HashSet::new();
 
-    for result in &search_results {
-        if let Some(node) = graph.get_weight(&result.node_id)
-            && expected_set.contains(&node.name)
-        {
-            found.insert(node.name.clone());
-        } else {
-            tracing::warn!("Node {} not found in graph, skipping", result.node_id.0);
+    for symbol in expected_symbols {
+        let search_results = search::search_bm25_only(conn, symbol, 10).unwrap_or_default();
+        for result in &search_results {
+            if let Some(node) = graph.get_weight(&result.node_id) {
+                if &node.name == symbol {
+                    found.insert(node.name.clone());
+                }
+            }
         }
     }
 
