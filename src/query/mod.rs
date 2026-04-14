@@ -25,7 +25,7 @@ pub fn resolve_target(graph: &GraphState, file: &str, symbol: Option<&str>) -> O
             .graph
             .node_indices()
             .filter_map(|idx| graph.graph.node_weight(idx))
-            .find(|w| w.name == sym_name && w.file_path.to_string_lossy().contains(file))
+            .find(|w| w.name == sym_name && w.file_path.to_string_lossy().ends_with(file))
             .map(|w| w.id.clone())
     } else {
         graph
@@ -320,6 +320,19 @@ mod tests {
         g.add_node(make_node("n1", "hello", "src/lib.rs"));
         assert!(resolve_target(&g, "src/lib.rs", Some("hello")).is_some());
         assert!(resolve_target(&g, "src/lib.rs", Some("missing")).is_none());
+    }
+
+    #[test]
+    fn test_resolve_target_with_absolute_path() {
+        let mut g = GraphState::new();
+        g.add_node(make_node(
+            "n1",
+            "parse_config",
+            "/full/path/to/sample_project/src/config.rs",
+        ));
+
+        let result = resolve_target(&g, "src/config.rs", Some("parse_config"));
+        assert!(result.is_some(), "Should match via suffix");
     }
 
     #[test]
