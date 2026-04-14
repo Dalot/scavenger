@@ -187,4 +187,38 @@ mod tests {
         assert!(!results.is_empty());
         assert_eq!(results[0].node_id.0, "n1");
     }
+
+    #[test]
+    fn test_search_bm25_returns_findable_nodes() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        crate::db::schema::ensure_branch_schema(&conn).unwrap();
+
+        conn.execute(
+            "INSERT INTO nodes (id, kind, name, file_path, line_start, line_end, signature, signature_hash, skeleton, checksum)
+             VALUES ('config::parse_config', 'Function', 'parse_config', 'src/config.rs', 10, 22, 'pub fn parse_config()', 'aabb0011', 'pub fn parse_config()', X'DEADBEEF')",
+            [],
+        ).unwrap();
+
+        conn.execute(
+            "INSERT INTO nodes_fts (rowid, name, signature, docstring)
+             VALUES (1, 'parse_config', 'pub fn parse_config()', NULL)",
+            [],
+        )
+        .unwrap();
+
+        let mut graph = GraphState::new();
+        graph.load_from_db(&conn).unwrap();
+
+        let results = search_bm25_only(&conn, "parse_config", 10).unwrap();
+        assert!(!results.is_empty(), "Should find results");
+
+        if let Some(ref first) = results.first() {
+            let found = graph.get_weight(&first.node_id);
+            assert!(
+                found.is_some(),
+                "FTS5 result should be findable in graph. Got: {:?}",
+                first.node_id
+            );
+        }
+    }
 }

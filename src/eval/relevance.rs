@@ -336,6 +336,8 @@ fn compute_bm25_baseline(
             && expected_set.contains(&node.name)
         {
             found.insert(node.name.clone());
+        } else {
+            tracing::warn!("Node {} not found in graph, skipping", result.node_id.0);
         }
     }
 
