@@ -10,8 +10,11 @@ mod observe;
 mod query;
 
 use clap::{Parser, Subcommand};
+use indicatif::{ProgressBar, ProgressStyle};
 use owo_colors::OwoColorize;
 use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 #[derive(Parser)]
 #[command(
@@ -44,29 +47,34 @@ enum Commands {
     /// Print a capsule to stdout
     Capsule {
         /// File to generate capsule for
+        #[arg(help = "Source file to generate capsule for")]
         file: PathBuf,
         /// Symbol name within the file
+        #[arg(help = "Specific symbol name within the file to focus on")]
         symbol: Option<String>,
         /// Query string for intent detection
-        #[arg(long)]
+        #[arg(
+            long,
+            help = "Query string for intent detection to prioritize relevant context"
+        )]
         query: Option<String>,
         /// Token budget override
-        #[arg(long)]
+        #[arg(long, help = "Maximum token budget for the generated capsule")]
         budget: Option<u32>,
         /// Context depth: "minimal", "standard" (default), "detailed"
-        #[arg(long)]
+        #[arg(long, help = "Context depth level: minimal, standard, or detailed")]
         detail_level: Option<String>,
         /// Override max caller count
-        #[arg(long)]
+        #[arg(long, help = "Maximum number of caller functions to include")]
         max_callers: Option<u32>,
         /// Override max callee count
-        #[arg(long)]
+        #[arg(long, help = "Maximum number of callee functions to include")]
         max_callees: Option<u32>,
         /// Override max annotation count
-        #[arg(long)]
+        #[arg(long, help = "Maximum number of annotations to include")]
         max_annotations: Option<u32>,
         /// Include full function body if budget allows
-        #[arg(long)]
+        #[arg(long, help = "Include full function bodies when budget allows")]
         include_body: Option<bool>,
     },
 
@@ -192,49 +200,62 @@ enum Commands {
     /// Run evaluation suites to measure Scavenger's quality and performance
     Eval {
         /// Which eval suite to run: relevance, accuracy, performance, agent
-        #[arg(long)]
+        #[arg(
+            long,
+            help = "Specific eval suite to run: relevance, accuracy, performance, or agent"
+        )]
         suite: Option<String>,
 
         /// Run all suites (default)
-        #[arg(long)]
+        #[arg(long, help = "Run all available eval suites")]
         all: bool,
 
         /// Which tier to run: component, agent, all
-        #[arg(long, default_value = "component")]
+        #[arg(
+            long,
+            default_value = "component",
+            help = "Evaluation tier: component, agent, or all"
+        )]
         tier: String,
 
         /// Code to evaluate against — the project(s) that Scavenger will
         /// index and run evals on. Can point to a single project directory
         /// or a directory of projects. Defaults to eval/corpus/
-        #[arg(long)]
+        #[arg(
+            long,
+            help = "Path to evaluation corpus (project or directory of projects)"
+        )]
         corpus: Option<String>,
 
         /// Run agent tasks matching this glob pattern
-        #[arg(long)]
+        #[arg(long, help = "Glob pattern to filter agent tasks to run")]
         tasks: Option<String>,
 
         /// Which AI agent to use for tier-2 evals: claude, cursor
-        #[arg(long)]
+        #[arg(long, help = "AI agent to use for tier-2 evals: claude or cursor")]
         agent: Option<String>,
 
         /// Output results as structured JSON
-        #[arg(long)]
+        #[arg(long, help = "Output evaluation results as structured JSON")]
         json: bool,
 
         /// Use a custom thresholds file instead of eval/thresholds.toml
-        #[arg(long)]
+        #[arg(
+            long,
+            help = "Path to custom thresholds file (default: eval/thresholds.toml)"
+        )]
         thresholds: Option<String>,
 
         /// Run agent eval without Scavenger (baseline only)
-        #[arg(long)]
+        #[arg(long, help = "Run baseline evaluation without Scavenger enabled")]
         baseline: bool,
 
         /// Compare results against a previous eval run
-        #[arg(long)]
+        #[arg(long, help = "Path to previous eval results to compare against")]
         compare: Option<String>,
 
         /// Generate an HTML report from the last eval run
-        #[arg(long)]
+        #[arg(long, help = "Generate an HTML report from the last evaluation run")]
         report: bool,
     },
 }
@@ -322,25 +343,41 @@ enum DbCommands {
     /// List indexed AST symbols
     Nodes {
         /// Max rows to show
-        #[arg(long, default_value = "30")]
+        #[arg(
+            long,
+            default_value = "30",
+            help = "Maximum number of nodes to display"
+        )]
         limit: u32,
     },
     /// List indexed source files
     Files {
         /// Max rows to show
-        #[arg(long, default_value = "30")]
+        #[arg(
+            long,
+            default_value = "30",
+            help = "Maximum number of files to display"
+        )]
         limit: u32,
     },
     /// List annotations
     Annotations {
         /// Max rows to show
-        #[arg(long, default_value = "30")]
+        #[arg(
+            long,
+            default_value = "30",
+            help = "Maximum number of annotations to display"
+        )]
         limit: u32,
     },
     /// Show recent token_log entries (from daemon_meta.db)
     Tokens {
         /// Max rows to show
-        #[arg(long, default_value = "20")]
+        #[arg(
+            long,
+            default_value = "20",
+            help = "Maximum number of token log entries to display"
+        )]
         limit: u32,
     },
     /// Run a read-only SQL query against the branch DB
@@ -465,39 +502,60 @@ fn cmd_init() -> Result<(), Box<dyn std::error::Error>> {
     let conn = db::open_branch_db(&scavenger_dir, &branch)?;
     let _meta_conn = db::open_daemon_meta_db(&scavenger_dir)?;
 
+    // Setup Ctrl+C signal handling for graceful shutdown
+    let shutdown = Arc::new(AtomicBool::new(false));
+    let shutdown_clone = shutdown.clone();
+    let rt = tokio::runtime::Runtime::new()?;
+    rt.spawn(async move {
+        let _ = tokio::signal::ctrl_c().await;
+        shutdown_clone.store(true, Ordering::SeqCst);
+    });
+
     // Step 3: Bulk index all source files
     let source_files = graph::index::collect_source_files(&project_root);
-    eprintln!(
-        "  Indexing {} source files...",
-        source_files.len().to_string().cyan()
+    let pb = ProgressBar::new(source_files.len() as u64);
+    pb.set_style(
+        ProgressStyle::default_bar()
+            .template("  {spinner:.green} [{bar:40.cyan/blue}] {pos}/{len} {msg}")
+            .unwrap()
+            .progress_chars("#>-"),
     );
+    pb.set_message("Indexing source files...");
     let mut graph_state = graph::GraphState::new();
     let stats = graph::index::bulk_index(&conn, &mut graph_state, &source_files)?;
-    eprintln!(
-        "  Indexed: {} files, {} symbols, {} edges",
-        stats.files_indexed.to_string().green(),
-        stats.symbols_extracted.to_string().green(),
-        stats.edges_created.to_string().green(),
-    );
+    pb.finish_with_message(format!(
+        "Indexed {} files, {} symbols, {} edges",
+        stats.files_indexed, stats.symbols_extracted, stats.edges_created
+    ));
 
     // Step 4: Index doc files
     let doc_files =
         graph::doc_indexer::collect_doc_files(&project_root, &cfg.docs.patterns, &cfg.docs.exclude);
     if !doc_files.is_empty() {
-        eprintln!(
-            "  Indexing {} doc files...",
-            doc_files.len().to_string().cyan()
+        let pb = ProgressBar::new(doc_files.len() as u64);
+        pb.set_style(
+            ProgressStyle::default_bar()
+                .template("  {spinner:.green} [{bar:40.cyan/blue}] {pos}/{len} {msg}")
+                .unwrap()
+                .progress_chars("#>-"),
         );
+        pb.set_message("Indexing doc files...");
         let mut doc_chunks = 0u32;
         for doc_path in &doc_files {
+            // Check for shutdown signal periodically during doc indexing
+            if shutdown.load(Ordering::SeqCst) {
+                eprintln!("\nInterrupted, stopping...");
+                return Ok(());
+            }
             if let Ok(content) = std::fs::read_to_string(doc_path) {
                 let rel = doc_path.to_string_lossy().to_string();
                 if let Ok(count) = graph::doc_indexer::index_doc_file(&conn, &rel, &content) {
                     doc_chunks += count;
                 }
             }
+            pb.inc(1);
         }
-        eprintln!("  Doc chunks: {}", doc_chunks.to_string().green());
+        pb.finish_with_message(format!("Indexed {} doc chunks", doc_chunks));
     }
 
     // Step 5: Create Claude Code plugin
@@ -634,19 +692,23 @@ fn cmd_index(path: Option<PathBuf>) -> Result<(), Box<dyn std::error::Error>> {
     let conn = db::open_branch_db(&scavenger_dir, &branch)?;
 
     let source_files = graph::index::collect_source_files(&project_root);
-    eprintln!(
-        "Re-indexing {} files on branch {branch}...",
-        source_files.len()
+    let pb = ProgressBar::new(source_files.len() as u64);
+    pb.set_style(
+        ProgressStyle::default_bar()
+            .template("{spinner:.green} [{bar:40.cyan/blue}] {pos}/{len} {msg}")
+            .unwrap()
+            .progress_chars("#>-"),
     );
+    pb.set_message(format!("Re-indexing files on branch {branch}..."));
 
     let mut g = graph::GraphState::new();
     g.load_from_db(&conn)?;
     let stats = graph::index::bulk_index(&conn, &mut g, &source_files)?;
 
-    eprintln!(
+    pb.finish_with_message(format!(
         "Indexed: {} files, {} symbols, {} edges",
         stats.files_indexed, stats.symbols_extracted, stats.edges_created
-    );
+    ));
     Ok(())
 }
 
@@ -702,7 +764,7 @@ fn cmd_capsule(
     let result = capsule::assemble(&conn, &g, &cfg, &qr, budget, &constraints);
 
     println!("{}", result.text);
-    eprintln!(
+    println!(
         "({} tokens, {} items)",
         result.token_count, result.items_included
     );
