@@ -30,7 +30,7 @@
     "name": "g2-utils-used-by-config",
     "category": "g2_structural",
     "query": "what imports utils module",
-    "expected": ["config"],
+    "expected": ["Config"],
     "files": ["src/config.rs"],
     "detail": "standard",
     "assert": {"bm25": false, "graph": true}

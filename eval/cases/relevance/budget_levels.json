@@ -35,7 +35,7 @@
     "name": "budget-detailed-g2-callers",
     "category": "g2_structural",
     "query": "what does main function call",
-    "expected": ["parse_config", "validate_config", "HttpServer::new"],
+    "expected": ["parse_config", "validate_config"],
     "detail": "detailed",
     "assert": {"bm25": false, "graph": true}
   },

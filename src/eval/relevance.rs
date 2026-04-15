@@ -12,12 +12,100 @@ use crate::eval::corpus::CorpusEntry;
 use crate::eval::coverage::{ContextMetrics, calculate_acs, first_correct_position};
 use crate::eval::thresholds::{PerformanceMetric, RelevanceMetric, Thresholds};
 use crate::eval::{CaseResult, Correctness};
+use crate::graph::types::NodeKind;
 use crate::graph::{self, GraphState};
 use crate::query;
 use crate::query::search;
 use rusqlite::Connection;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
+
+fn extract_target_from_query(query: &str) -> Option<String> {
+    let lower = query.to_lowercase();
+    let patterns: &[(&[&str], fn(&str, &[&str]) -> Option<String>)] = &[
+        (
+            &[
+                "callers of ",
+                "where is the ",
+                "where is ",
+                "where does ",
+                "impact of changing ",
+                "what is exported from ",
+                "what imports ",
+                "responsible for ",
+            ],
+            strip_prefix_token,
+        ),
+        (&["what does "], strip_what_does),
+        (&["depend on"], strip_depend_on),
+        (&["what is affected by "], strip_what_is_affected),
+    ];
+    for (prefixes, extractor) in patterns {
+        if prefixes.iter().any(|p| lower.contains(p)) {
+            if let Some(result) = extractor(&lower, prefixes) {
+                let cleaned = result
+                    .trim()
+                    .trim_end_matches(" module")
+                    .trim_end_matches(" function")
+                    .trim_end_matches(" struct");
+                if !cleaned.is_empty() {
+                    return Some(cleaned.to_string());
+                }
+            }
+        }
+    }
+    None
+}
+
+fn strip_prefix_token(lower: &str, prefixes: &[&str]) -> Option<String> {
+    for prefix in prefixes {
+        if let Some(rest) = lower.strip_prefix(prefix) {
+            return Some(rest.to_string());
+        }
+    }
+    None
+}
+
+fn strip_what_does(lower: &str, _prefixes: &[&str]) -> Option<String> {
+    if let Some(rest) = lower.strip_prefix("what does ") {
+        let end_markers = [" call", " depend", " use", " do"];
+        for marker in &end_markers {
+            if let Some(pos) = rest.find(marker) {
+                let token = &rest[..pos];
+                let cleaned = token.trim();
+                if !cleaned.is_empty() {
+                    return Some(cleaned.to_string());
+                }
+            }
+        }
+        let token = rest.split_whitespace().next().unwrap_or("");
+        if !token.is_empty() {
+            return Some(token.to_string());
+        }
+    }
+    None
+}
+
+fn strip_depend_on(lower: &str, _prefixes: &[&str]) -> Option<String> {
+    if let Some(pos) = lower.find(" depend") {
+        let before = &lower[..pos];
+        let words: Vec<&str> = before.split_whitespace().collect();
+        if let Some(last) = words.last() {
+            return Some(last.to_string());
+        }
+    }
+    None
+}
+
+fn strip_what_is_affected(lower: &str, _prefixes: &[&str]) -> Option<String> {
+    if let Some(rest) = lower.strip_prefix("what is affected by ") {
+        let cleaned = rest.trim_end_matches(" changes").trim();
+        if !cleaned.is_empty() {
+            return Some(cleaned.to_string());
+        }
+    }
+    None
+}
 
 /// Run all relevance evaluation cases
 pub fn run_relevance_eval(
@@ -218,8 +306,6 @@ fn run_single_relevance_case(
 
     let config = Config::default();
 
-    // Resolve target using the first expected file + symbol as hints.
-    // Fall back to pure BM25 search if no target resolves.
     let symbol_hint = case.expected_symbols.first().map(|s| s.as_str());
     let file_hint = case
         .expected_files
@@ -227,15 +313,76 @@ fn run_single_relevance_case(
         .map(|f| f.as_str())
         .unwrap_or("");
 
-    let qr = query::run_query(
-        &conn,
-        &graph,
-        &config,
-        file_hint,
-        symbol_hint,
-        Some(&case.query),
-        &CapsuleConstraints::from_detail(DetailLevel::Standard),
-    );
+    let primary_target = query::resolve_target(&graph, file_hint, symbol_hint)
+        .or_else(|| query::resolve_target(&graph, "", symbol_hint));
+
+    let query_target = extract_target_from_query(&case.query)
+        .and_then(|name| query::resolve_target(&graph, "", Some(&name)));
+
+    let target = primary_target.clone().or(query_target.clone());
+
+    let search_query = case.query.as_str();
+    let search_results = search::search(&conn, &graph, search_query, 50).unwrap_or_default();
+
+    let intent_result = query::intent::classify(&case.query);
+
+    let neighbor_ids = if let Some(ref target_id) = target {
+        let mut ids = query::collect_neighbors_public(
+            &graph,
+            target_id,
+            &intent_result,
+            &config,
+            &CapsuleConstraints::from_detail(DetailLevel::Standard),
+        );
+
+        if let Some(ref qid) = query_target {
+            if target_id != qid {
+                let extra = query::collect_neighbors_public(
+                    &graph,
+                    qid,
+                    &intent_result,
+                    &config,
+                    &CapsuleConstraints::from_detail(DetailLevel::Standard),
+                );
+                for id in extra {
+                    if !ids.contains(&id) {
+                        ids.push(id);
+                    }
+                }
+            }
+        }
+
+        if let Some(weight) = graph.get_weight(target_id) {
+            if matches!(weight.kind, NodeKind::Class) {
+                let impl_name = format!("impl {}", weight.name);
+                if let Some(impl_id) = graph.get_weight_by_name(&impl_name).map(|w| w.id.clone()) {
+                    let impl_neighbors = query::collect_neighbors_public(
+                        &graph,
+                        &impl_id,
+                        &intent_result,
+                        &config,
+                        &CapsuleConstraints::from_detail(DetailLevel::Standard),
+                    );
+                    for id in impl_neighbors {
+                        if !ids.contains(&id) {
+                            ids.push(id);
+                        }
+                    }
+                }
+            }
+        }
+
+        ids
+    } else {
+        Vec::new()
+    };
+
+    let qr = query::QueryResult {
+        target,
+        intent: intent_result,
+        neighbor_ids,
+        search_results,
+    };
 
     // Parse detail level from case
     let detail_level = match case.detail_level.as_str() {

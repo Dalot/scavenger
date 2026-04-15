@@ -81,6 +81,13 @@ impl GraphState {
             .and_then(|idx| self.graph.node_weight(idx))
     }
 
+    pub fn get_weight_by_name(&self, name: &str) -> Option<&NodeWeight> {
+        self.graph
+            .node_indices()
+            .filter_map(|idx| self.graph.node_weight(idx))
+            .find(|w| w.name == name)
+    }
+
     pub fn add_edge(
         &mut self,
         from: &NodeId,

@@ -165,6 +165,10 @@ fn extract_symbols_recursive(
         });
 
         extract_call_edges(node, source, &id, &name, edges);
+
+        if lang == "rust" && node.kind() == "impl_item" {
+            extract_impl_contains_edges(node, source, &id, edges);
+        }
     }
 
     let mut cursor = node.walk();
@@ -498,6 +502,30 @@ fn extract_call_edges(
     }
 }
 
+fn extract_impl_contains_edges(
+    impl_node: tree_sitter::Node,
+    source: &[u8],
+    impl_id: &NodeId,
+    edges: &mut Vec<ExtractedEdge>,
+) {
+    let body = impl_node.child_by_field_name("body").unwrap_or(impl_node);
+    let mut cursor = body.walk();
+    for child in body.children(&mut cursor) {
+        if child.kind() == "function_item" {
+            if let Some(name_node) = child.child_by_field_name("name")
+                && let Ok(method_name) = name_node.utf8_text(source)
+            {
+                edges.push(ExtractedEdge {
+                    from_id: impl_id.clone(),
+                    to_name: method_name.to_string(),
+                    kind: EdgeKind::Contains,
+                    confidence: Confidence::Precise,
+                });
+            }
+        }
+    }
+}
+
 /// Bulk index all source files from the given paths.
 /// Uses rayon for parallelism (tree-sitter Parser is not Send, so we create
 /// thread-local instances).
@@ -524,6 +552,7 @@ pub fn bulk_index(
     let mut total_edges = 0u64;
     let mut total_files = 0u64;
     let mut name_to_id: HashMap<String, NodeId> = HashMap::new();
+    let mut file_name_to_id: HashMap<(String, String), NodeId> = HashMap::new();
 
     let tx = conn.unchecked_transaction()?;
 
@@ -570,13 +599,34 @@ pub fn bulk_index(
             };
             graph.add_node(weight);
             name_to_id.insert(sym.name.clone(), sym.id.clone());
+            file_name_to_id.insert((sym.file_path.clone(), sym.name.clone()), sym.id.clone());
             total_symbols += 1;
+        }
+    }
+
+    let mut impl_file_map: HashMap<NodeId, String> = HashMap::new();
+    for result in &results {
+        for sym in &result.symbols {
+            if sym.name.starts_with("impl ") {
+                impl_file_map.insert(sym.id.clone(), sym.file_path.clone());
+            }
         }
     }
 
     for result in &results {
         for edge in &result.edges {
-            if let Some(to_id) = name_to_id.get(&edge.to_name) {
+            let to_id = if edge.kind == EdgeKind::Contains {
+                if let Some(impl_file) = impl_file_map.get(&edge.from_id) {
+                    file_name_to_id
+                        .get(&(impl_file.clone(), edge.to_name.clone()))
+                        .or_else(|| name_to_id.get(&edge.to_name))
+                } else {
+                    name_to_id.get(&edge.to_name)
+                }
+            } else {
+                name_to_id.get(&edge.to_name)
+            };
+            if let Some(to_id) = to_id {
                 queries::upsert_edge(
                     &tx,
                     &edge.from_id.0,

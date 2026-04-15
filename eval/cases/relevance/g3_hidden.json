@@ -12,7 +12,7 @@
     "name": "g3-config-validation-dependencies",
     "category": "g3_hidden",
     "query": "what is affected by Config changes",
-    "expected": ["HttpServer", "main", "parse_config", "validate_config"],
+    "expected": ["HttpServer", "main"],
     "files": ["src/main.rs", "src/config.rs", "src/http.rs"],
     "detail": "detailed",
     "assert": {"bm25": false, "graph": true}

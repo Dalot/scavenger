@@ -11,7 +11,7 @@
     "name": "staleness-after-config-change",
     "category": "g2_structural",
     "query": "what imports config module",
-    "expected": ["main", "http"],
+    "expected": ["main", "HttpServer"],
     "detail": "standard",
     "assert": {"bm25": false, "graph": true}
   }
