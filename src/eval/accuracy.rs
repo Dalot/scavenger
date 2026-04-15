@@ -1,6 +1,6 @@
-use crate::eval::CaseResult;
 use crate::eval::corpus::CorpusEntry;
 use crate::eval::thresholds::{AccuracyMetric, Thresholds};
+use crate::eval::{CaseResult, Correctness};
 use crate::query::intent::{Intent, classify};
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -93,7 +93,13 @@ fn run_single_accuracy_case(
 
     Ok(CaseResult {
         case_name: case.name.clone(),
+        category: "accuracy".to_string(),
         metrics,
+        correctness: if correct {
+            Correctness::Correct
+        } else {
+            Correctness::Incorrect
+        },
         passed,
         failure_reason: if correct {
             None
@@ -103,5 +109,7 @@ fn run_single_accuracy_case(
                 expected_intent, primary_intent
             ))
         },
+        bm25_recall: 0.0,
+        graph_recall: if correct { 1.0 } else { 0.0 },
     })
 }

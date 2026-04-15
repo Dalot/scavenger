@@ -1,6 +1,8 @@
 [relevance]
 min_recall = 0.80
 min_precision = 0.60
+min_correct_rate = 0.70
+max_incorrect_rate = 0.10
 
 [accuracy]
 min_intent_accuracy = 0.90

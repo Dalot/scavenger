@@ -56,6 +56,13 @@ const UNDERSTAND_KEYWORDS: &[&str] = &[
     "overview",
     "describe",
     "where is",
+    "where does",
+    "where are",
+    "pipeline",
+    "chain",
+    "flow",
+    "full",
+    "all code",
 ];
 const EXTEND_KEYWORDS: &[&str] = &[
     "add",

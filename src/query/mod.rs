@@ -21,12 +21,39 @@ pub struct QueryResult {
 /// Resolve the target node from file + optional symbol name.
 pub fn resolve_target(graph: &GraphState, file: &str, symbol: Option<&str>) -> Option<NodeId> {
     if let Some(sym_name) = symbol {
-        graph
+        let exact = graph
             .graph
             .node_indices()
             .filter_map(|idx| graph.graph.node_weight(idx))
-            .find(|w| w.name == sym_name && w.file_path.to_string_lossy().contains(file))
-            .map(|w| w.id.clone())
+            .find(|w| w.name == sym_name && w.file_path.to_string_lossy().ends_with(file))
+            .map(|w| w.id.clone());
+        if exact.is_some() {
+            return exact;
+        }
+        let case_insensitive = graph
+            .graph
+            .node_indices()
+            .filter_map(|idx| graph.graph.node_weight(idx))
+            .find(|w| {
+                w.name.eq_ignore_ascii_case(sym_name)
+                    && w.file_path.to_string_lossy().ends_with(file)
+            })
+            .map(|w| w.id.clone());
+        if case_insensitive.is_some() {
+            return case_insensitive;
+        }
+        let suffix = graph
+            .graph
+            .node_indices()
+            .filter_map(|idx| graph.graph.node_weight(idx))
+            .filter(|w| w.name.contains(sym_name) && w.file_path.to_string_lossy().ends_with(file))
+            .max_by(|a, b| {
+                let a_len = a.name.len();
+                let b_len = b.name.len();
+                a_len.cmp(&b_len)
+            })
+            .map(|w| w.id.clone());
+        suffix
     } else {
         graph
             .graph
@@ -97,6 +124,17 @@ pub fn run_query(
 }
 
 /// Collect neighbor nodes based on intent-driven traversal.
+pub fn collect_neighbors_public(
+    graph: &GraphState,
+    target: &NodeId,
+    intent: &IntentResult,
+    config: &Config,
+    constraints: &CapsuleConstraints,
+) -> Vec<NodeId> {
+    collect_neighbors(graph, target, intent, config, constraints)
+}
+
+/// Collect neighbor nodes based on intent-driven traversal.
 fn collect_neighbors(
     graph: &GraphState,
     target: &NodeId,
@@ -104,15 +142,17 @@ fn collect_neighbors(
     config: &Config,
     constraints: &CapsuleConstraints,
 ) -> Vec<NodeId> {
-    let max_nodes = constraints.max_extended_neighbors as usize;
+    let max_nodes = if constraints.max_extended_neighbors > 0 {
+        constraints.max_extended_neighbors as usize
+    } else {
+        (constraints.max_callers + constraints.max_callees) as usize
+    };
     let degree_cap = config.traversal.degree_cap as usize;
 
-    let node_budget = if max_nodes > 0 { max_nodes } else { 0 };
-
-    let mut primary = traversal_for_intent(graph, target, &intent.primary, node_budget, degree_cap);
+    let mut primary = traversal_for_intent(graph, target, &intent.primary, max_nodes, degree_cap);
 
     if let Some(ref secondary_intent) = intent.secondary {
-        let secondary_budget = (node_budget as f64 * intent.secondary_weight) as usize;
+        let secondary_budget = (max_nodes as f64 * intent.secondary_weight) as usize;
         let secondary = traversal_for_intent(
             graph,
             target,
@@ -120,10 +160,10 @@ fn collect_neighbors(
             secondary_budget,
             degree_cap,
         );
-        let primary_budget = (node_budget as f64 * intent.primary_weight) as usize;
+        let primary_budget = (max_nodes as f64 * intent.primary_weight) as usize;
         primary.truncate(primary_budget);
         for id in secondary {
-            if !primary.contains(&id) && primary.len() < node_budget {
+            if !primary.contains(&id) && primary.len() < max_nodes {
                 primary.push(id);
             }
         }
@@ -166,7 +206,6 @@ fn traversal_for_intent(
             bfs(graph, target, Direction::Outgoing, 5, budget, degree_cap)
         }
         Intent::Understand => {
-            // Bidirectional BFS: 2 hops each direction
             let incoming = bfs(
                 graph,
                 target,
@@ -175,7 +214,7 @@ fn traversal_for_intent(
                 budget / 2,
                 degree_cap,
             );
-            let mut result = incoming;
+            let mut result = incoming.clone();
             let outgoing = bfs(
                 graph,
                 target,
@@ -184,9 +223,45 @@ fn traversal_for_intent(
                 budget.saturating_sub(result.len()),
                 degree_cap,
             );
-            for id in outgoing {
-                if !result.contains(&id) {
-                    result.push(id);
+            for id in &outgoing {
+                if !result.contains(id) {
+                    result.push(id.clone());
+                }
+            }
+            for caller_id in &incoming {
+                let caller_out = bfs(
+                    graph,
+                    caller_id,
+                    Direction::Outgoing,
+                    1,
+                    budget.saturating_sub(result.len()),
+                    degree_cap,
+                );
+                for id in caller_out {
+                    if !result.contains(&id) {
+                        result.push(id);
+                    }
+                }
+                if result.len() >= budget {
+                    break;
+                }
+            }
+            for callee_id in &outgoing {
+                let callee_in = bfs(
+                    graph,
+                    callee_id,
+                    Direction::Incoming,
+                    1,
+                    budget.saturating_sub(result.len()),
+                    degree_cap,
+                );
+                for id in callee_in {
+                    if !result.contains(&id) {
+                        result.push(id);
+                    }
+                }
+                if result.len() >= budget {
+                    break;
                 }
             }
             result
@@ -320,6 +395,19 @@ mod tests {
         g.add_node(make_node("n1", "hello", "src/lib.rs"));
         assert!(resolve_target(&g, "src/lib.rs", Some("hello")).is_some());
         assert!(resolve_target(&g, "src/lib.rs", Some("missing")).is_none());
+    }
+
+    #[test]
+    fn test_resolve_target_with_absolute_path() {
+        let mut g = GraphState::new();
+        g.add_node(make_node(
+            "n1",
+            "parse_config",
+            "/full/path/to/sample_project/src/config.rs",
+        ));
+
+        let result = resolve_target(&g, "src/config.rs", Some("parse_config"));
+        assert!(result.is_some(), "Should match via suffix");
     }
 
     #[test]

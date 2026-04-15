@@ -1,4 +1,4 @@
-use scavenger::eval::{CaseResult, EvalTier};
+use scavenger::eval::{CaseResult, Correctness, EvalTier};
 use scavenger::eval::{print_json, print_summary, run_suite};
 use std::collections::HashMap;
 
@@ -6,15 +6,23 @@ fn make_test_results() -> Vec<CaseResult> {
     vec![
         CaseResult {
             case_name: "test-pass".to_string(),
+            category: "test".to_string(),
             metrics: HashMap::from([("recall".to_string(), 0.9)]),
+            correctness: Correctness::Partial,
             passed: true,
             failure_reason: None,
+            bm25_recall: 0.8,
+            graph_recall: 0.9,
         },
         CaseResult {
             case_name: "test-fail".to_string(),
+            category: "test".to_string(),
             metrics: HashMap::from([("recall".to_string(), 0.5)]),
+            correctness: Correctness::Incorrect,
             passed: false,
             failure_reason: Some("below threshold".to_string()),
+            bm25_recall: 0.3,
+            graph_recall: 0.5,
         },
     ]
 }

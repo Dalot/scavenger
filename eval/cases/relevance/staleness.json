@@ -1,0 +1,18 @@
+[
+  {
+    "name": "staleness-baseline",
+    "category": "g2_structural",
+    "query": "who calls parse_config",
+    "expected": ["main", "parse_config"],
+    "detail": "standard",
+    "assert": {"bm25": false, "graph": true}
+  },
+  {
+    "name": "staleness-after-config-change",
+    "category": "g2_structural",
+    "query": "what imports config module",
+    "expected": ["main", "HttpServer"],
+    "detail": "standard",
+    "assert": {"bm25": false, "graph": true}
+  }
+]

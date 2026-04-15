@@ -1,0 +1,47 @@
+[
+  {
+    "name": "g3-request-logging-full-chain",
+    "category": "g3_hidden",
+    "query": "all code responsible for request logging",
+    "expected": ["handle_request", "process_request", "log_message"],
+    "files": ["src/http.rs", "src/middleware/logging.rs", "src/logger.rs"],
+    "detail": "detailed",
+    "assert": {"bm25": false, "graph": true}
+  },
+  {
+    "name": "g3-config-validation-dependencies",
+    "category": "g3_hidden",
+    "query": "what is affected by Config changes",
+    "expected": ["HttpServer", "main"],
+    "files": ["src/main.rs", "src/config.rs", "src/http.rs"],
+    "detail": "detailed",
+    "assert": {"bm25": false, "graph": true}
+  },
+  {
+    "name": "g3-logger-impact-analysis",
+    "category": "g3_hidden",
+    "query": "impact of changing LogFormatter",
+    "expected": ["LoggingMiddleware", "handle_request"],
+    "files": ["src/logger.rs", "src/middleware/logging.rs", "src/http.rs"],
+    "detail": "detailed",
+    "assert": {"bm25": false, "graph": true}
+  },
+  {
+    "name": "g3-transitive-middleware",
+    "category": "g3_hidden",
+    "query": "full request handling pipeline",
+    "expected": ["HttpServer", "handle_request", "process_request"],
+    "files": ["src/http.rs", "src/middleware/logging.rs"],
+    "detail": "detailed",
+    "assert": {"bm25": false, "graph": true}
+  },
+  {
+    "name": "g3-data-flow-chain",
+    "category": "g3_hidden",
+    "query": "where does user input get processed",
+    "expected": ["parse_config", "validate_config", "main"],
+    "files": ["src/config.rs", "src/main.rs"],
+    "detail": "detailed",
+    "assert": {"bm25": false, "graph": true}
+  }
+]
