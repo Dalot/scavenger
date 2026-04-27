@@ -85,7 +85,7 @@ fs2 = "0.4"
 owo-colors = "4"
 ratatui = "0.30"
 crossterm = "0.29"
-indicatif = "0.17"
+indicatif = "0.18"
 
 # Logging / observability
 tracing = "0.1"
