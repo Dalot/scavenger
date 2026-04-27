@@ -21,7 +21,7 @@ path = "src/main.rs"
 
 [dependencies]
 # MCP SDK
-rmcp = { version = "1.4", features = ["server", "transport-io"] }
+rmcp = { version = "1.5", features = ["server", "transport-io"] }
 schemars = "1"
 
 # AST parsing
