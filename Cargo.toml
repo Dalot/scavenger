@@ -70,7 +70,7 @@ figment = { version = "0.10", features = ["env", "toml"] }
 
 # Concurrency
 parking_lot = "0.12"
-rayon = "1.10"
+rayon = "1.12"
 
 # Text processing
 heck = "0.5"
